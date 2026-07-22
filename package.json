@@ -1,0 +1,56 @@
+{
+  "name": "lumina-audiolibros",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "electron.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "electron:start": "electron .",
+    "electron:dev": "vite build && electron .",
+    "dist": "vite build && electron-packager . Lumina --platform=win32 --arch=x64 --icon=assets/icon.ico --out=dist-desktop --overwrite --ignore=\"/(src|vite\\.config\\.js|build-ico|dist-desktop|\\.git|\\.antigravitycli|\\.claude)/\""
+  },
+  "dependencies": {
+    "framer-motion": "^12.40.0",
+    "idb": "^8.0.3",
+    "music-metadata": "^11.12.3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
+    "electron-packager": "^17.1.2",
+    "png-to-ico": "^3.0.1",
+    "vite": "^8.0.14",
+    "vite-plugin-node-polyfills": "^0.28.0"
+  },
+  "build": {
+    "appId": "com.lumina.audiolibros",
+    "productName": "Lumina",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "dist/**/*",
+      "electron.js",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}

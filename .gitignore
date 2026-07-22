@@ -1,0 +1,15 @@
+# Dependencias
+node_modules/
+
+# Builds
+dist/
+dist-desktop/
+
+# Biblioteca de prueba (varios GB)
+audios/
+
+# Accesos directos y ajustes locales de la máquina
+Lumina.lnk
+.claude/settings.local.json
+
+*.log
