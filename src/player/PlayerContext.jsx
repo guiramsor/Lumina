@@ -307,7 +307,9 @@ export function PlayerProvider({ children }) {
       setBook(view)
 
       const progress = await getProgress(rawBook.id)
-      const startTrack = progress?.trackIndex ?? 0
+      // Un libro terminado se reabre desde el principio: no basta con poner el
+      // tiempo a 0, hay que volver también a la primera pista.
+      const startTrack = progress?.finished ? 0 : progress?.trackIndex ?? 0
       let startTime = progress?.finished ? 0 : progress?.time ?? 0
       // Rebobinado inteligente entre sesiones: retomar un poco antes de donde
       // se dejó, según cuánto tiempo haya pasado desde la última escucha.
