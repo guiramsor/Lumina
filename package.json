@@ -9,8 +9,9 @@
     "build": "vite build",
     "preview": "vite preview --host",
     "electron:start": "electron .",
-    "electron:dev": "vite build && electron .",
-    "dist": "vite build && electron-packager . Lumina --platform=win32 --arch=x64 --icon=assets/icon.ico --out=dist-desktop --overwrite --ignore=\"/(src|vite\\.config\\.js|build-ico|dist-desktop|\\.git|\\.antigravitycli|\\.claude)/\""
+    "electron:dev": "node scripts/dev.mjs",
+    "electron:build": "vite build && electron .",
+    "dist": "vite build && electron-packager . Lumina --platform=win32 --arch=x64 --icon=assets/icon.ico --out=dist-desktop --overwrite --ignore=\"/(src|scripts|vite\\.config\\.js|build-ico|dist-desktop|\\.git|\\.gitignore|\\.antigravitycli|\\.claude)/\""
   },
   "dependencies": {
     "framer-motion": "^12.40.0",

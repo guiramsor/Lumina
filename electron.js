@@ -66,11 +66,12 @@ function createWindow() {
   // Ocultar el menú de navegación clásico (Archivo, Editar, etc.) para una estética premium e integrada
   Menu.setApplicationMenu(null);
 
-  // Cargar la aplicación dependiendo del entorno
-  const isDev = process.env.NODE_ENV === 'development';
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+  // En desarrollo (npm run dev) el script scripts/dev.mjs pasa la URL real del
+  // servidor de Vite; en la app empaquetada se carga el build de dist/.
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    mainWindow.loadURL(devServerUrl);
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
   }
