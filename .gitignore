@@ -8,6 +8,10 @@ dist-desktop/
 # Biblioteca de prueba (varios GB)
 audios/
 
+# Credenciales de sincronizacion (ver .env.example)
+.env
+.env.local
+
 # Accesos directos y ajustes locales de la máquina
 Lumina.lnk
 .claude/settings.local.json

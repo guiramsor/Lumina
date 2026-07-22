@@ -6,6 +6,7 @@
   "main": "electron.js",
   "scripts": {
     "dev": "vite",
+    "test": "node --test test/*.test.mjs",
     "build": "vite build",
     "preview": "vite preview --host",
     "electron:start": "electron .",
@@ -14,6 +15,7 @@
     "dist": "vite build && electron-packager . Lumina --platform=win32 --arch=x64 --icon=assets/icon.ico --out=dist-desktop --overwrite --ignore=\"/(src|scripts|vite\\.config\\.js|build-ico|dist-desktop|\\.git|\\.gitignore|\\.antigravitycli|\\.claude)/\""
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.8",
     "framer-motion": "^12.40.0",
     "idb": "^8.0.3",
     "music-metadata": "^11.12.3",
