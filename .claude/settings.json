@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/build-if-stale.mjs",
+            "timeout": 600,
+            "statusMessage": "Recompilando Lumina si hay cambios…"
+          }
+        ]
+      }
+    ]
+  }
+}

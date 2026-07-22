@@ -1,0 +1,49 @@
+name: Compilar Lumina
+
+# Cada push a main genera el ejecutable y lo publica como release descargable.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Un build a la vez: si llegan varios pushes seguidos, solo interesa el último.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Empaquetar la aplicación
+        run: npm run dist
+
+      - name: Comprimir
+        run: Compress-Archive -Path dist-desktop/Lumina-win32-x64/* -DestinationPath Lumina-win32-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumina-win32-x64
+          path: Lumina-win32-x64.zip
+
+      - name: Publicar release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "build-${{ github.run_number }}" Lumina-win32-x64.zip
+          --title "Lumina build ${{ github.run_number }}"
+          --notes "Compilado automaticamente desde el commit ${{ github.sha }}. Descarga el zip, descomprimelo y ejecuta Lumina.exe."
