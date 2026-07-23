@@ -5,6 +5,19 @@ node_modules/
 dist/
 dist-desktop/
 
+# Android (app movil)
+android/build/
+android/app/build/
+android/.gradle/
+# local.properties guarda la ruta del SDK, propia de cada maquina
+android/local.properties
+android/.idea/
+android/app/release/
+*.apk
+*.aab
+*.keystore
+*.jks
+
 # Biblioteca de prueba (varios GB)
 audios/
 
