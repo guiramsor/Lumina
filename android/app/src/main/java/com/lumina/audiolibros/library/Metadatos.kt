@@ -107,7 +107,15 @@ object Metadatos {
                 }
             }
             bitmap.recycle()
-            mejorColor.takeIf { mejorPuntuacion > 0f }
+            if (mejorPuntuacion <= 0f) return null
+
+            // Mismo recorte que extractPalette en el escritorio: el acento se
+            // fuerza a un rango vivo y claro. Sin esto, una portada oscura da
+            // un acento casi negro sobre el que no se lee nada.
+            android.graphics.Color.colorToHSV(mejorColor, hsv)
+            hsv[1] = hsv[1].coerceIn(0.55f, 0.92f)
+            hsv[2] = hsv[2].coerceIn(0.62f, 0.86f)
+            android.graphics.Color.HSVToColor(hsv)
         }.getOrNull()
     }
 }

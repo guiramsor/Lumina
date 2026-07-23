@@ -6,7 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -34,12 +34,22 @@ fun LuminaTheme(
     acento: Color = VioletaLumina,
     content: @Composable () -> Unit,
 ) {
+    // Sobre el acento va texto oscuro si es claro y texto claro si es oscuro.
+    // Darlo por supuesto es la forma segura de acabar con letras negras
+    // invisibles cuando la portada tiñe la app de un color apagado.
+    val sobreAcento = if (acento.luminance() > 0.45f) Color(0xFF0B0A14) else TextoPrincipal
+
     val esquema = darkColorScheme(
         primary = acento,
-        onPrimary = Color(0xFF0B0A14),
+        onPrimary = sobreAcento,
         primaryContainer = acento.copy(alpha = 0.22f),
         onPrimaryContainer = TextoPrincipal,
         secondary = acento.copy(alpha = 0.8f),
+        onSecondary = sobreAcento,
+        secondaryContainer = acento.copy(alpha = 0.24f),
+        onSecondaryContainer = TextoPrincipal,
+        tertiary = acento,
+        onTertiary = sobreAcento,
         background = FondoNoche,
         onBackground = TextoPrincipal,
         surface = SuperficieNoche,
@@ -49,6 +59,16 @@ fun LuminaTheme(
         outline = TrazoSuave,
         outlineVariant = TrazoSuave,
         error = Color(0xFFFF8080),
+        onError = Color(0xFF0B0A14),
+        // Los contenedores que Material usa para dialogos y menus: sin fijarlos
+        // se quedan en los grises por defecto, que desentonan con el violeta.
+        surfaceContainer = SuperficieNoche,
+        surfaceContainerHigh = SuperficieAlta,
+        surfaceContainerHighest = SuperficieAlta,
+        surfaceContainerLow = SuperficieNoche,
+        surfaceContainerLowest = FondoNoche,
+        inverseSurface = TextoPrincipal,
+        inverseOnSurface = FondoNoche,
     )
 
     val vista = LocalView.current

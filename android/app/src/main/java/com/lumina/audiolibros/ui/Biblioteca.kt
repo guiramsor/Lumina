@@ -254,6 +254,7 @@ private fun TarjetaLibro(
         Text(
             libro.titulo,
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -261,6 +262,7 @@ private fun TarjetaLibro(
             Text(
                 libro.autor,
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -272,7 +274,11 @@ private fun TarjetaLibro(
                 modifier = Modifier.fillMaxWidth().height(3.dp),
             )
         }
-        Text(formatearTiempo(libro.duracionMs), style = MaterialTheme.typography.labelSmall)
+        Text(
+            formatearTiempo(libro.duracionMs),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

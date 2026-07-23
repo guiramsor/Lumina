@@ -6,7 +6,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,12 +40,17 @@ private fun Raiz() {
     var sonando by remember { mutableStateOf(false) }
 
     LuminaTheme(acento = acento) {
-        FondoReactivo(acento = acento, animado = sonando) {
-            LuminaApp(
-                onAcento = { acento = it ?: VioletaLumina },
-                onSonando = { sonando = it },
-                modifier = Modifier.fillMaxSize().safeDrawingPadding(),
-            )
+        // Sin un Surface envolviendo la app, Material deja el color de texto
+        // por defecto en negro y nada se lee sobre el fondo oscuro. Se fija
+        // aquí para toda la interfaz.
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+            FondoReactivo(acento = acento, animado = sonando) {
+                LuminaApp(
+                    onAcento = { acento = it ?: VioletaLumina },
+                    onSonando = { sonando = it },
+                    modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+                )
+            }
         }
     }
 }
