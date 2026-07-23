@@ -56,6 +56,11 @@ jobs:
       - name: Comprimir
         run: Compress-Archive -Path dist-desktop/Lumina-win32-x64/* -DestinationPath Lumina-win32-x64.zip
 
+      # Comprueba que la app empaquetada abre de verdad. Un error de ejecución
+      # en el proceso principal no lo detecta ni compilar ni empaquetar.
+      - name: Test de arranque
+        run: npm run test:arranque
+
       - uses: actions/upload-artifact@v4
         with:
           name: Lumina-win32-x64

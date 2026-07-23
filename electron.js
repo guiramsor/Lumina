@@ -11,6 +11,41 @@ let mainWindow;
 
 registrarEsquema();
 
+const stateFile = () => path.join(app.getPath('userData'), 'window-state.json');
+
+function loadWindowState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
+    // Solo restaurar si la posición guardada sigue siendo visible en algún monitor
+    const visible = screen.getAllDisplays().some((d) => {
+      const a = d.workArea;
+      return (
+        state.x >= a.x - 100 &&
+        state.y >= a.y - 50 &&
+        state.x < a.x + a.width - 100 &&
+        state.y < a.y + a.height - 100
+      );
+    });
+    if (!visible) return { maximized: state.maximized };
+    return state;
+  } catch {
+    return {};
+  }
+}
+
+function saveWindowState() {
+  if (!mainWindow) return;
+  try {
+    const bounds = mainWindow.isMaximized() ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+    fs.writeFileSync(
+      stateFile(),
+      JSON.stringify({ ...bounds, maximized: mainWindow.isMaximized() })
+    );
+  } catch {
+    /* ignorar: perder el estado de la ventana no es crítico */
+  }
+}
+
 function createWindow() {
   const state = loadWindowState();
   mainWindow = new BrowserWindow({

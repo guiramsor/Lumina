@@ -8,6 +8,7 @@
     "dev": "vite",
     "test": "node --test test/*.test.mjs",
     "test:protocolo": "electron test/electron/protocolo.mjs",
+    "test:arranque": "node scripts/smoke-escritorio.mjs",
     "build": "vite build",
     "preview": "vite preview --host",
     "electron:start": "electron .",
