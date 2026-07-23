@@ -7,12 +7,16 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -30,23 +34,39 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.library.AudioLibrary
 import com.lumina.audiolibros.library.Audiolibro
+import com.lumina.audiolibros.library.Metadatos
 import com.lumina.audiolibros.sync.SupabaseSync
 import kotlinx.coroutines.launch
 
 private enum class Pantalla { BIBLIOTECA, REPRODUCTOR, SESION, ESTADISTICAS }
 
 @Composable
-fun LuminaApp(modifier: Modifier = Modifier) {
+fun LuminaApp(
+    onAcento: (Color?) -> Unit = {},
+    onSonando: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val alcance = rememberCoroutineScope()
     val estado = recordarEstadoReproductor(alcance)
+
+    // El acento de toda la app sale de la portada del libro en curso.
+    LaunchedEffect(estado.libro?.portada) {
+        val dominante = enFondo { Metadatos.colorDominante(estado.libro?.portada) }
+        onAcento(dominante?.let { Color(it) })
+    }
+    LaunchedEffect(estado.sonando) { onSonando(estado.sonando) }
 
     var pantalla by remember { mutableStateOf(Pantalla.BIBLIOTECA) }
     var biblioteca by remember { mutableStateOf<List<Audiolibro>>(emptyList()) }
@@ -131,12 +151,20 @@ fun LuminaApp(modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Lumina", style = MaterialTheme.typography.headlineSmall)
+            Column {
+                Text("Lumina", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    "Tu biblioteca de audiolibros",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Row {
-                TextButton(onClick = { pantalla = Pantalla.ESTADISTICAS }) { Text("Escucha") }
-                TextButton(onClick = { pantalla = Pantalla.SESION }) {
-                    Text(if (enSesion) "Sincronizado" else "Entrar")
-                }
+                BotonIcono(onClick = { pantalla = Pantalla.ESTADISTICAS }) { c, g -> iconoGrafico(c, g) }
+                BotonIcono(
+                    onClick = { pantalla = Pantalla.SESION },
+                    tinte = if (enSesion) MaterialTheme.colorScheme.primary else null,
+                ) { c, g -> iconoNube(c, g) }
             }
         }
 
@@ -254,6 +282,26 @@ private fun tienePermisoAudio(context: Context): Boolean {
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
     return ContextCompat.checkSelfPermission(context, permiso) == PackageManager.PERMISSION_GRANTED
+}
+
+/** Botón redondo con un icono de Lumina dentro. */
+@Composable
+fun BotonIcono(
+    onClick: () -> Unit,
+    tamano: Dp = 44.dp,
+    tinte: Color? = null,
+    dibujo: DrawScope.(Color, Float) -> Unit,
+) {
+    val color = tinte ?: MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        Modifier
+            .size(tamano)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        IconoLumina(tamano = 21.dp, color = color, dibujo = dibujo)
+    }
 }
 
 internal fun formatearTiempo(ms: Long): String {

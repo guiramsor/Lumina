@@ -1,6 +1,7 @@
 package com.lumina.audiolibros.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,7 +83,7 @@ fun PantallaReproductor(
             Modifier.fillMaxWidth().padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onVolver) { Text("‹  Biblioteca") }
+            BotonIcono(onClick = onVolver) { c, g -> iconoChevronIzq(c, g) }
             Spacer(Modifier.weight(1f))
             IconoSincronizacion(estado) { dialogo = "sync" }
         }
@@ -130,15 +135,25 @@ fun PantallaReproductor(
             horizontalArrangement = Arrangement.spacedBy(20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedButton(onClick = { estado.saltar(-15) }) { Text("−15s") }
-            Button(
-                onClick = { estado.alternar() },
-                shape = CircleShape,
-                modifier = Modifier.size(76.dp),
+            SaltoIcono("15", atras = true) { estado.saltar(-15) }
+
+            // Botón principal, con el halo del acento del libro detrás.
+            Box(
+                Modifier
+                    .size(78.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable { estado.alternar() },
+                contentAlignment = Alignment.Center,
             ) {
-                Text(if (estado.sonando) "❚❚" else "▶", fontSize = 22.sp)
+                IconoLumina(
+                    tamano = 34.dp,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    dibujo = if (estado.sonando) { c, g -> iconoPausa(c, g) } else { c, g -> iconoPlay(c, g) },
+                )
             }
-            OutlinedButton(onClick = { estado.saltar(30) }) { Text("+30s") }
+
+            SaltoIcono("30", atras = false) { estado.saltar(30) }
         }
 
         Spacer(Modifier.height(20.dp))
@@ -150,9 +165,10 @@ fun PantallaReproductor(
         ) {
             BotonVelocidad(estado)
             BotonSueno(estado)
-            TextButton(onClick = { dialogo = "marcadores" }) {
-                Text("Marcadores${if (marcadores.isNotEmpty()) " (${marcadores.size})" else ""}")
-            }
+            BotonEtiqueta(
+                texto = if (marcadores.isEmpty()) "Marcar" else "${marcadores.size}",
+                onClick = { dialogo = "marcadores" },
+            ) { c, g -> iconoMarcador(c, g) }
         }
 
         Spacer(Modifier.weight(1f))
@@ -186,6 +202,32 @@ fun PantallaReproductor(
     }
 }
 
+/**
+ * Salto de 15 o 30 segundos: la flecha circular del escritorio con el número
+ * dentro, en vez de un botón de texto.
+ */
+@Composable
+private fun SaltoIcono(segundos: String, atras: Boolean, onClick: () -> Unit) {
+    val color = MaterialTheme.colorScheme.onSurface
+    Box(
+        Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        IconoLumina(tamano = 30.dp, color = color) { c, g ->
+            if (atras) iconoAtras15(c, g) else iconoAdelante30(c, g)
+        }
+        Text(
+            segundos,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            color = color,
+        )
+    }
+}
+
 /* ---------------- Sincronización ---------------- */
 
 /**
@@ -200,19 +242,15 @@ private fun IconoSincronizacion(estado: EstadoReproductor, onClick: () -> Unit) 
     ) {
         when (estado.estadoSync) {
             EstadoSync.SUBIENDO -> CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(18.dp),
                 strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
             )
-            EstadoSync.HECHO -> Simbolo("✓", MaterialTheme.colorScheme.primary)
-            EstadoSync.FALLO -> Simbolo("!", MaterialTheme.colorScheme.error)
-            EstadoSync.INACTIVO -> Simbolo("☁", MaterialTheme.colorScheme.onSurfaceVariant)
+            EstadoSync.HECHO -> IconoLumina(20.dp, MaterialTheme.colorScheme.primary) { c, g -> iconoNube(c, g) }
+            EstadoSync.FALLO -> IconoLumina(20.dp, MaterialTheme.colorScheme.error) { c, g -> iconoNube(c, g) }
+            EstadoSync.INACTIVO -> IconoLumina(20.dp, MaterialTheme.colorScheme.onSurfaceVariant) { c, g -> iconoNube(c, g) }
         }
     }
-}
-
-@Composable
-private fun Simbolo(texto: String, color: androidx.compose.ui.graphics.Color) {
-    Text(texto, color = color, fontSize = 15.sp)
 }
 
 @Composable
@@ -257,14 +295,38 @@ private fun DialogoSincronizacion(estado: EstadoReproductor, onCerrar: () -> Uni
 
 /* ---------------- Velocidad y sueño ---------------- */
 
+/** Píldora de cristal con icono y texto, el patrón de botón secundario. */
+@Composable
+private fun BotonEtiqueta(
+    texto: String,
+    onClick: () -> Unit,
+    resaltado: Boolean = false,
+    dibujo: DrawScope.(Color, Float) -> Unit,
+) {
+    val color = if (resaltado) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        IconoLumina(tamano = 17.dp, color = color, dibujo = dibujo)
+        Text(texto, style = MaterialTheme.typography.labelMedium, color = color)
+    }
+}
+
 /** Botón que despliega las velocidades y se cierra al elegir una. */
 @Composable
 private fun BotonVelocidad(estado: EstadoReproductor) {
     var abierto by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { abierto = true }) {
-            Text("${estado.velocidad}×".replace(".0×", "×"))
-        }
+        BotonEtiqueta(
+            texto = "${estado.velocidad}×".replace(".0×", "×"),
+            onClick = { abierto = true },
+        ) { c, g -> iconoVelocidad(c, g) }
         DropdownMenu(expanded = abierto, onDismissRequest = { abierto = false }) {
             VELOCIDADES.forEach { v ->
                 DropdownMenuItem(
@@ -283,13 +345,13 @@ private fun BotonVelocidad(estado: EstadoReproductor) {
 private fun BotonSueno(estado: EstadoReproductor) {
     var abierto by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { abierto = true }) {
-            Text(
-                if (estado.modoSueno == ModoSueno.MINUTOS) {
-                    formatearTiempo(estado.suenoRestanteS * 1000L)
-                } else "Temporizador"
-            )
-        }
+        BotonEtiqueta(
+            texto = if (estado.modoSueno == ModoSueno.MINUTOS) {
+                formatearTiempo(estado.suenoRestanteS * 1000L)
+            } else "Sueño",
+            onClick = { abierto = true },
+            resaltado = estado.modoSueno == ModoSueno.MINUTOS,
+        ) { c, g -> iconoLuna(c, g) }
         DropdownMenu(expanded = abierto, onDismissRequest = { abierto = false }) {
             MINUTOS_SUENO.forEach { m ->
                 DropdownMenuItem(

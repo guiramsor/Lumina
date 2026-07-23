@@ -3,6 +3,7 @@ package com.lumina.audiolibros.ui
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,8 +71,9 @@ fun Portada(ruta: String?, titulo: String, modifier: Modifier = Modifier) {
     val imagen = recordarPortada(ruta)
     Box(
         modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
         contentAlignment = Alignment.Center,
     ) {
         if (imagen != null) {
@@ -82,7 +84,10 @@ fun Portada(ruta: String?, titulo: String, modifier: Modifier = Modifier) {
                 contentScale = ContentScale.Crop,
             )
         } else {
-            Text("🎧", style = MaterialTheme.typography.headlineMedium)
+            // Sin portada, el icono de libro del escritorio en vez de un emoji.
+            IconoLumina(tamano = 34.dp, color = MaterialTheme.colorScheme.onSurfaceVariant) { c, g ->
+                iconoLibro(c, g)
+            }
         }
     }
 }
@@ -132,6 +137,12 @@ fun PantallaBiblioteca(
             onValueChange = { busqueda = it },
             placeholder = { Text("Buscar…") },
             singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            leadingIcon = {
+                IconoLumina(tamano = 18.dp, color = MaterialTheme.colorScheme.onSurfaceVariant) { c, g ->
+                    iconoBuscar(c, g)
+                }
+            },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         )
 
@@ -193,10 +204,11 @@ private fun HeroContinuar(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
             .clickable { onPulsar() }
-            .padding(12.dp),
+            .padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Portada(libro.portada, libro.titulo, Modifier.size(72.dp))
