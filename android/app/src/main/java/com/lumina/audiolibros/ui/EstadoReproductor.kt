@@ -89,15 +89,32 @@ class EstadoReproductor(
     private var ultimaSubida = 0L
     private var segundosAcumulados = 0.0
 
+    /**
+     * Dos cerrojos que impiden destruir el avance hecho en el otro dispositivo:
+     *
+     * - `colocado`: hasta que el reproductor no está en la posición correcta,
+     *   no se guarda nada. Si no, los primeros segundos desde cero se
+     *   guardarían como si fueran la posición real.
+     * - `lecturaRemotaFiable`: si no se ha podido leer la nube, jamás se sube.
+     *   Sobrescribir lo que no has llegado a leer es la forma más rápida de
+     *   perder siete horas de escucha.
+     */
+    private var colocado = false
+    private var lecturaRemotaFiable = false
+
     /* ---------------- Abrir ---------------- */
 
     fun abrir(elegido: Audiolibro, alTerminar: () -> Unit = {}) {
         val c = controller ?: return
         cargando = true
         aviso = null
+        colocado = false
+        lecturaRemotaFiable = false
         alcance.launch {
             val local = AlmacenLocal.progreso(context, elegido.bookId)
-            val remoto = SupabaseSync.descargar(context, elegido.bookId)
+            val lectura = SupabaseSync.descargar(context, elegido.bookId)
+            val remoto = lectura.getOrNull()
+            lecturaRemotaFiable = lectura.isSuccess
 
             var posicion = local?.posicionMs ?: 0L
             var escuchadoEn = local?.actualizadoEn ?: 0L
@@ -126,26 +143,39 @@ class EstadoReproductor(
             velocidad = suya
             ultimaPausaEn = null
 
-            c.setMediaItem(
-                MediaItem.Builder()
-                    .setUri(elegido.uri)
-                    .setMediaId(elegido.bookId)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(elegido.titulo)
-                            .setArtist(elegido.autor.ifEmpty { "Audiolibro" })
-                            .setIsPlayable(true)
-                            .setIsBrowsable(false)
-                            .setExtras(Bundle().apply { putString(EXTRA_TRACK_ID, elegido.trackId) })
-                            .build()
-                    )
-                    .build()
+            android.util.Log.i(
+                "LuminaSync",
+                "abrir '${elegido.titulo}' local=${local?.posicionMs}ms " +
+                    "remoto=${remoto?.posicionSegundos?.toLong()}s fiable=$lecturaRemotaFiable -> ${posicion}ms"
             )
-            c.prepare()
-            if (posicion > 0) c.seekTo(posicion)
+
+            val item = MediaItem.Builder()
+                .setUri(elegido.uri)
+                .setMediaId(elegido.bookId)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(elegido.titulo)
+                        .setArtist(elegido.autor.ifEmpty { "Audiolibro" })
+                        .setIsPlayable(true)
+                        .setIsBrowsable(false)
+                        .setExtras(Bundle().apply { putString(EXTRA_TRACK_ID, elegido.trackId) })
+                        .build()
+                )
+                .build()
+
+            // La posición se pasa al cargar el medio, no con un seekTo posterior:
+            // así no hay ventana en la que el reproductor esté en el segundo 0.
+            c.setMediaItem(item, posicion)
             c.setPlaybackSpeed(suya)
+            c.prepare()
             c.play()
+            colocado = true
             cargando = false
+
+            if (!lecturaRemotaFiable) {
+                aviso = "Sin conexión con la nube: se escucha desde la posición del móvil " +
+                    "y no se subirá nada para no pisar la del ordenador."
+            }
             alTerminar()
         }
     }
@@ -222,6 +252,9 @@ class EstadoReproductor(
     fun guardar(forzar: Boolean) {
         val c = controller ?: return
         val actual = libro ?: return
+        // Sin haber colocado la posición, lo que hay en el reproductor no
+        // representa dónde va la escucha: guardarlo destruiría el avance.
+        if (!colocado) return
         val posicion = c.currentPosition
         if (posicion <= 0) return
         val ahora = System.currentTimeMillis()
@@ -241,6 +274,11 @@ class EstadoReproductor(
         // La nube se actualiza mucho menos a menudo que el disco local.
         if (!forzar && ahora - ultimaSubida < 30_000) return
         if (!SupabaseSync.haySesion(context)) return
+        // Nunca sobrescribir una posición remota que no se ha podido leer.
+        if (!lecturaRemotaFiable) {
+            android.util.Log.w("LuminaSync", "No se sube: la lectura remota fallo al abrir")
+            return
+        }
         ultimaSubida = ahora
         estadoSync = EstadoSync.SUBIENDO
         alcance.launch {

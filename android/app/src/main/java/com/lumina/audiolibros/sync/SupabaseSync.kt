@@ -112,10 +112,18 @@ object SupabaseSync {
 
     /* ---------------- Progreso ---------------- */
 
-    /** Posición guardada en la nube, o null si no hay nada o falla la red. */
-    suspend fun descargar(context: Context, bookId: String): Progreso? = withContext(Dispatchers.IO) {
-        if (!configurado()) return@withContext null
-        val acceso = token(context) ?: return@withContext null
+    /**
+     * Posición guardada en la nube.
+     *
+     * Devuelve `success(null)` cuando el libro aún no tiene fila, y `failure`
+     * cuando no se ha podido leer. La diferencia es crítica: nunca se debe
+     * sobrescribir una posición que no hemos llegado a leer, o una lectura
+     * fallida borraría el avance hecho en el otro dispositivo.
+     */
+    suspend fun descargar(context: Context, bookId: String): Result<Progreso?> = withContext(Dispatchers.IO) {
+        if (!configurado()) return@withContext Result.success(null)
+        val acceso = token(context)
+            ?: return@withContext Result.failure(Exception("Sin sesión"))
         runCatching {
             val filtro = URLEncoder.encode("eq.$bookId", "UTF-8")
             val cuerpo = peticion(
@@ -137,7 +145,7 @@ object SupabaseSync {
                 actualizadoEn = instanteDe(fila.optString("updated_at")),
                 dispositivo = fila.optString("device").takeIf { it.isNotEmpty() },
             )
-        }.getOrNull()
+        }.onFailure { android.util.Log.w("LuminaSync", "No se pudo leer el progreso remoto", it) }
     }
 
     /** Sube la posición actual. Nunca lanza: un fallo de red no debe molestar. */
