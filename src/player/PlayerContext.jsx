@@ -80,6 +80,11 @@ export function PlayerProvider({ children }) {
   if (!audioRef.current && typeof Audio !== 'undefined') {
     audioRef.current = new Audio()
     audioRef.current.preload = 'metadata'
+    // Imprescindible desde que los audios se sirven por `lumina://`: ese es
+    // otro origen distinto al de la interfaz, y la Web Audio API silencia
+    // cualquier medio de otro origen que no declare CORS en el elemento. Sin
+    // esto el reproductor avanza pero no suena nada, sin dar ningún error.
+    audioRef.current.crossOrigin = 'anonymous'
   }
 
   const audioCtxRef = useRef(null)
