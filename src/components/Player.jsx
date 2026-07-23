@@ -15,7 +15,40 @@ import {
   MoonIcon,
   BookmarkIcon,
   ListIcon,
+  CloudIcon,
 } from './Icons.jsx'
+import { isConfigured } from '../lib/sync.js'
+
+/**
+ * Estado de la sincronización, en la esquina de la barra superior.
+ *
+ * Deliberadamente pequeño: es información de fondo. El detalle vive en el
+ * tooltip, que en escritorio es lo natural, en vez de ocupar sitio en la
+ * pantalla del libro.
+ */
+function SyncBadge() {
+  const { syncState, syncedAt } = usePlayer()
+  if (!isConfigured()) return null
+
+  const hace = syncedAt ? Math.round((Date.now() - syncedAt) / 1000) : null
+  const titulo = {
+    subiendo: 'Guardando la posición en la nube…',
+    hecho:
+      hace == null
+        ? 'Posición sincronizada'
+        : hace < 60
+          ? `Posición sincronizada hace ${hace} s`
+          : `Posición sincronizada hace ${Math.round(hace / 60)} min`,
+    fallo: 'No se pudo contactar con la nube. La posición está guardada en este equipo.',
+    inactivo: 'La posición se sincroniza al pausar y cada 30 segundos.',
+  }[syncState]
+
+  return (
+    <span className={`sync-badge ${syncState}`} title={titulo}>
+      <CloudIcon size={18} />
+    </span>
+  )
+}
 
 export default function Player({ onBack }) {
   const { book, chapters, currentChapter, visualMode, setVisualMode, isPlaying, sleep, globalTime, totalDuration } =
@@ -62,7 +95,9 @@ export default function Player({ onBack }) {
           />
         </div>
 
-        <div className="topbar-spacer" />
+        <div className="topbar-spacer">
+          <SyncBadge />
+        </div>
       </div>
 
       <div className="player-main">

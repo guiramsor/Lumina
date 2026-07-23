@@ -14,10 +14,19 @@ const URL = import.meta.env?.VITE_SUPABASE_URL || ''
 const KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || ''
 
 let client = null
+let sesionActiva = false
 
 /** ¿Hay proyecto de Supabase configurado en el build? */
 export function isConfigured() {
   return Boolean(URL && KEY)
+}
+
+/**
+ * ¿Hay sesión iniciada ahora mismo? Es una lectura síncrona para que la
+ * interfaz pueda decidir si mostrar el estado de sincronización sin esperar.
+ */
+export function haySesion() {
+  return sesionActiva
 }
 
 function getClient() {
@@ -25,6 +34,14 @@ function getClient() {
   if (!client) {
     client = createClient(URL, KEY, {
       auth: { persistSession: true, autoRefreshToken: true },
+    })
+    // Mantener la bandera al día: al restaurar la sesión guardada, al entrar
+    // y al salir.
+    client.auth.getSession().then(({ data }) => {
+      sesionActiva = Boolean(data?.session)
+    })
+    client.auth.onAuthStateChange((_evento, sesion) => {
+      sesionActiva = Boolean(sesion)
     })
   }
   return client
@@ -44,11 +61,13 @@ export async function signIn(email, password) {
   if (!db) throw new Error('La sincronización no está configurada en esta compilación.')
   const { data, error } = await db.auth.signInWithPassword({ email, password })
   if (error) throw new Error(traducirError(error.message))
+  sesionActiva = true
   return data.user
 }
 
 export async function signOut() {
   await getClient()?.auth.signOut()
+  sesionActiva = false
 }
 
 export async function currentUser() {

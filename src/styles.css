@@ -689,6 +689,43 @@ img {
 }
 .topbar-spacer {
   width: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Indicador de sincronización: un icono y nada más */
+.sync-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--text-faint);
+  transition: color 0.3s ease, background 0.3s ease;
+}
+.sync-badge.hecho {
+  color: var(--accent-bright);
+  background: var(--accent-soft);
+}
+.sync-badge.fallo {
+  color: #ff8c8c;
+}
+.sync-badge.subiendo {
+  color: var(--accent-bright);
+  animation: sync-latido 1.1s ease-in-out infinite;
+}
+@keyframes sync-latido {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
 }
 .visual-toggle {
   position: relative;

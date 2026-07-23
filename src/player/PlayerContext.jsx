@@ -9,7 +9,7 @@ import {
   addListeningTime,
 } from '../lib/db.js'
 import { ensureFingerprints, trackIndexByFingerprint } from '../lib/bookIdentity.js'
-import { pullProgress, pushProgress, resolveProgress } from '../lib/sync.js'
+import { pullProgress, pushProgress, resolveProgress, haySesion } from '../lib/sync.js'
 
 /**
  * Smart rewind (estilo Audible): cuanto más tiempo lleves sin escuchar, más
@@ -93,6 +93,9 @@ export function PlayerProvider({ children }) {
   const [visualMode, setVisualModeState] = useState('vinyl')
   const [sleep, setSleep] = useState({ mode: null, remaining: null })
   const [settingsLoaded, setSettingsLoaded] = useState(false)
+  // 'inactivo' | 'subiendo' | 'hecho' | 'fallo'
+  const [syncState, setSyncState] = useState('inactivo')
+  const [syncedAt, setSyncedAt] = useState(null)
 
   const trackOffsets = useMemo(() => {
     if (!book) return []
@@ -269,7 +272,10 @@ export function PlayerProvider({ children }) {
       // 30 s mientras se escucha, y siempre al pausar o cerrar.
       if (!view.fingerprint) return
       if (!force && updatedAt - lastPushRef.current < 30_000) return
+      // Sin sesión no hay nada que subir, y marcarlo como fallo sería mentir.
+      if (!haySesion()) return
       lastPushRef.current = updatedAt
+      setSyncState('subiendo')
       pushProgress({
         bookId: view.fingerprint,
         trackId: view.tracks[trackIndex]?.fingerprint,
@@ -280,6 +286,9 @@ export function PlayerProvider({ children }) {
         title: view.title,
         author: view.author,
         updatedAt,
+      }).then((bien) => {
+        setSyncState(bien ? 'hecho' : 'fallo')
+        if (bien) setSyncedAt(Date.now())
       })
     },
     []
@@ -740,6 +749,8 @@ export function PlayerProvider({ children }) {
     visualMode,
     sleep,
     settingsLoaded,
+    syncState,
+    syncedAt,
     // controls
     loadBook,
     unloadBook,
