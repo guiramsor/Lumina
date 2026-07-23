@@ -120,7 +120,13 @@ object SupabaseSync {
      * sobrescribir una posición que no hemos llegado a leer, o una lectura
      * fallida borraría el avance hecho en el otro dispositivo.
      */
-    suspend fun descargar(context: Context, bookId: String): Result<Progreso?> = withContext(Dispatchers.IO) {
+    suspend fun descargar(
+        context: Context,
+        bookId: String,
+        duracionSegundos: Double = 0.0,
+        titulo: String? = null,
+        autor: String? = null,
+    ): Result<Progreso?> = withContext(Dispatchers.IO) {
         if (!configurado()) return@withContext Result.success(null)
         val acceso = token(context)
             ?: return@withContext Result.failure(Exception("Sin sesión"))
@@ -133,20 +139,50 @@ object SupabaseSync {
                 token = acceso,
             )
             val filas = JSONArray(cuerpo)
-            if (filas.length() == 0) return@runCatching null
-            val fila = filas.getJSONObject(0)
-            Progreso(
-                bookId = fila.getString("book_id"),
-                trackId = fila.optString("track_id").takeIf { it.isNotEmpty() && it != "null" },
-                posicionSegundos = fila.optDouble("position", 0.0),
-                posicionGlobalSegundos = fila.optDouble("global_position", 0.0),
-                duracionSegundos = fila.optDouble("duration").takeIf { !it.isNaN() },
-                terminado = fila.optBoolean("finished", false),
-                actualizadoEn = instanteDe(fila.optString("updated_at")),
-                dispositivo = fila.optString("device").takeIf { it.isNotEmpty() },
+            if (filas.length() > 0) return@runCatching leerFila(filas.getJSONObject(0))
+
+            // Sin fila para esta huella: el mismo libro puede estar en el otro
+            // dispositivo con otra codificación o las etiquetas editadas. Se
+            // busca por duración, que es lo que no cambia.
+            if (duracionSegundos <= 0) return@runCatching null
+            val margen = EmparejarLibros.toleranciaDuracion(duracionSegundos)
+            val desde = URLEncoder.encode("gte.${duracionSegundos - margen}", "UTF-8")
+            val hasta = URLEncoder.encode("lte.${duracionSegundos + margen}", "UTF-8")
+            val porDuracion = JSONArray(
+                peticion(
+                    metodo = "GET",
+                    ruta = "/rest/v1/progress?duration=$desde&duration=$hasta&select=*",
+                    cuerpo = null,
+                    token = acceso,
+                )
             )
+            val candidatas = (0 until porDuracion.length()).map { porDuracion.getJSONObject(it) }
+            val elegida = EmparejarLibros.elegirCoincidencia(
+                filas = candidatas,
+                duracion = duracionSegundos,
+                titulo = titulo,
+                autor = autor,
+                duracionDe = { it.optDouble("duration").takeIf { d -> !d.isNaN() } },
+                tituloDe = { it.optString("title") },
+                autorDe = { it.optString("author") },
+            )
+            elegida?.let {
+                android.util.Log.i("LuminaSync", "Libro emparejado por duración con ${it.optString("title")}")
+                leerFila(it)
+            }
         }.onFailure { android.util.Log.w("LuminaSync", "No se pudo leer el progreso remoto", it) }
     }
+
+    private fun leerFila(fila: JSONObject) = Progreso(
+        bookId = fila.getString("book_id"),
+        trackId = fila.optString("track_id").takeIf { it.isNotEmpty() && it != "null" },
+        posicionSegundos = fila.optDouble("position", 0.0),
+        posicionGlobalSegundos = fila.optDouble("global_position", 0.0),
+        duracionSegundos = fila.optDouble("duration").takeIf { !it.isNaN() },
+        terminado = fila.optBoolean("finished", false),
+        actualizadoEn = instanteDe(fila.optString("updated_at")),
+        dispositivo = fila.optString("device").takeIf { it.isNotEmpty() },
+    )
 
     /** Sube la posición actual. Nunca lanza: un fallo de red no debe molestar. */
     suspend fun subir(context: Context, progreso: Progreso, titulo: String?): Boolean =
@@ -177,13 +213,16 @@ object SupabaseSync {
         }
 
     /**
-     * Decide qué posición vale. Igual que en el escritorio: gana la más
-     * reciente, con 60 s de margen para que un desfase de reloj entre
-     * dispositivos no haga saltar la reproducción hacia atrás sin motivo.
+     * Decide qué posición vale. Igual que en el escritorio: gana la escucha
+     * más **avanzada**, no la más reciente, para que ningún dispositivo haga
+     * retroceder lo escuchado en el otro. Ver docs/SYNC.md.
      */
-    fun ganaLaRemota(remota: Progreso?, localActualizadaEn: Long): Boolean {
+    fun ganaLaRemota(remota: Progreso?, posicionLocalSegundos: Double): Boolean {
         if (remota == null) return false
-        return remota.actualizadoEn > localActualizadaEn + 60_000
+        val posRemota = if (remota.posicionGlobalSegundos > 0) {
+            remota.posicionGlobalSegundos
+        } else remota.posicionSegundos
+        return EmparejarLibros.ganaLaRemota(posicionLocalSegundos, posRemota)
     }
 
     /* ---------------- HTTP ---------------- */

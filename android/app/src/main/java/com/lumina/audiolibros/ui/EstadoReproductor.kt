@@ -24,6 +24,7 @@ import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.library.Audiolibro
 import com.lumina.audiolibros.player.EXTRA_TRACK_ID
 import com.lumina.audiolibros.player.PlaybackService
+import com.lumina.audiolibros.sync.EmparejarLibros
 import com.lumina.audiolibros.sync.SupabaseSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -101,6 +102,8 @@ class EstadoReproductor(
      */
     private var colocado = false
     private var lecturaRemotaFiable = false
+    /** Ultima posicion remota conocida del libro abierto, en segundos. */
+    private var posicionRemotaConocida: Double? = null
 
     /* ---------------- Abrir ---------------- */
 
@@ -112,16 +115,27 @@ class EstadoReproductor(
         lecturaRemotaFiable = false
         alcance.launch {
             val local = AlmacenLocal.progreso(context, elegido.bookId)
-            val lectura = SupabaseSync.descargar(context, elegido.bookId)
+            // La duración y las etiquetas permiten reconocer el libro aunque
+            // el archivo del ordenador no sea idéntico al de este móvil.
+            val lectura = SupabaseSync.descargar(
+                context,
+                elegido.bookId,
+                duracionSegundos = elegido.duracionMs / 1000.0,
+                titulo = elegido.titulo,
+                autor = elegido.autor,
+            )
             val remoto = lectura.getOrNull()
             lecturaRemotaFiable = lectura.isSuccess
+            posicionRemotaConocida = remoto?.let {
+                if (it.posicionGlobalSegundos > 0) it.posicionGlobalSegundos else it.posicionSegundos
+            }
 
             var posicion = local?.posicionMs ?: 0L
             var escuchadoEn = local?.actualizadoEn ?: 0L
             var terminado = local?.terminado == true
 
-            // Si el otro dispositivo escuchó después, su posición manda.
-            if (SupabaseSync.ganaLaRemota(remoto, escuchadoEn) && remoto != null) {
+            // Gana la escucha más avanzada, venga de donde venga.
+            if (SupabaseSync.ganaLaRemota(remoto, posicion / 1000.0) && remoto != null) {
                 posicion = (remoto.posicionSegundos * 1000).toLong()
                 escuchadoEn = remoto.actualizadoEn
                 terminado = remoto.terminado
@@ -277,6 +291,11 @@ class EstadoReproductor(
         // Nunca sobrescribir una posición remota que no se ha podido leer.
         if (!lecturaRemotaFiable) {
             android.util.Log.w("LuminaSync", "No se sube: la lectura remota fallo al abrir")
+            return
+        }
+        // No pisar una posición más avanzada guardada por el otro dispositivo.
+        if (!EmparejarLibros.debeSubir(posicion / 1000.0, posicionRemotaConocida)) {
+            android.util.Log.i("LuminaSync", "No se sube: la nube va mas avanzada")
             return
         }
         ultimaSubida = ahora

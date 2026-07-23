@@ -80,18 +80,60 @@ Una fila por cuenta y libro:
 
 ## Reglas de sincronización
 
-1. **Al abrir un libro**: se descarga la fila remota y se compara con la local.
-   Gana la de `updated_at` más reciente.
-2. **Margen de 60 segundos**: la remota solo gana si es más nueva que la local
-   por más de un minuto. Evita que un pequeño desfase de reloj entre
-   dispositivos haga saltar la reproducción hacia atrás sin motivo.
-3. **Al pausar, buscar o cada pocos segundos**: se sube la posición actual con
-   `updated_at` = el momento de la escucha.
-4. **Los fallos de red nunca bloquean**: si no hay conexión, se escucha en local
-   y se sube más tarde. La sincronización es una mejora, no un requisito.
-5. **`position` manda sobre `global_position`**: para retomar se busca la pista
+1. **Gana la escucha más avanzada, no la más reciente.** Al abrir un libro se
+   compara la posición local con la remota y se toma la mayor. Así ningún
+   dispositivo puede hacer retroceder lo escuchado en el otro, que es el
+   error que de verdad molesta: perder media hora de audiolibro.
+2. **Margen de 5 segundos** para que una diferencia de un par de segundos no
+   provoque un salto perceptible.
+3. **Nunca se pisa una posición más avanzada.** Antes de subir se comprueba la
+   última posición remota conocida: si va por delante de la nuestra, no se
+   sube. Un dispositivo que se quedó atrás no borra el avance del otro.
+4. **Reiniciar un libro sí se propaga.** Volver casi al principio (menos de
+   30 s, o un libro marcado como terminado) se considera intencionado y se
+   sube aunque haga retroceder la posición.
+5. **Los fallos de red nunca bloquean**: si no hay conexión, se escucha en
+   local y se sube más tarde. La sincronización es una mejora, no un requisito.
+6. **`position` manda sobre `global_position`**: para retomar se busca la pista
    por su `track_id` y se salta a `position`. `global_position` es solo
    informativo, porque depende del orden de las pistas.
+
+## Emparejar el mismo libro en archivos distintos
+
+La huella identifica copias idénticas byte a byte. Pero el mismo audiolibro
+puede estar en cada dispositivo con distinta codificación, o con las etiquetas
+editadas a mano, y entonces las huellas no coinciden aunque sea el mismo libro.
+
+Para eso hay una segunda vía, que se usa **solo si no existe fila para la
+huella**:
+
+```
+clave_blanda = normalizar(titulo) + "|" + normalizar(autor)
+
+normalizar(s):
+  1. pasar a minúsculas
+  2. quitar los diacríticos (NFD y eliminar las marcas)
+  3. sustituir por espacio todo lo que no sea [a-z0-9]
+  4. colapsar espacios repetidos y recortar
+```
+
+Así «El Ritmo de la Guerra», «el ritmo de la guerra» y «EL RITMO DE LA GUERRA»
+son la misma clave.
+
+La búsqueda se hace **por duración**, que es el dato más fiable porque no
+depende de cómo estén escritas las etiquetas:
+
+```
+tolerancia = max(10 s, duración × 0,2 %)
+candidatos = filas cuya duration esté dentro de [duración − tolerancia, duración + tolerancia]
+
+si hay un solo candidato            -> es el mismo libro
+si hay varios                       -> gana el que además tenga la misma clave blanda
+si hay varios y ninguno coincide    -> no se empareja ninguno
+```
+
+La duración manda y la clave blanda solo desempata: los títulos se editan, la
+duración no.
 
 ## Resolver la pista al retomar
 

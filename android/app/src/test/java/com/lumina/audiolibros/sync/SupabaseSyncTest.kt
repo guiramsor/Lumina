@@ -5,51 +5,57 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Reglas de resolución de conflictos de docs/SYNC.md. Es la lógica que decide
- * si al abrir un libro manda la posición del móvil o la del ordenador, así que
- * conviene fijarla: un error aquí hace saltar la reproducción sin motivo.
+ * Reglas de resolución de conflictos de docs/SYNC.md, tal y como las aplica el
+ * cliente de sincronización. Es la lógica que decide si al abrir un libro manda
+ * la posición del móvil o la del ordenador: un error aquí borra horas de
+ * escucha, así que conviene fijarla.
+ *
+ * La regla es «gana la escucha más avanzada», no la más reciente. Antes ganaba
+ * la más reciente y eso permitía que un dispositivo hiciera retroceder al otro.
  */
 class SupabaseSyncTest {
 
-    private val ahora = 1_700_000_000_000L
-
-    private fun remota(actualizadoEn: Long) = SupabaseSync.Progreso(
+    private fun remota(
+        posicion: Double,
+        global: Double = 0.0,
+    ) = SupabaseSync.Progreso(
         bookId = "libro",
         trackId = "pista",
-        posicionSegundos = 100.0,
-        posicionGlobalSegundos = 100.0,
-        duracionSegundos = 3600.0,
+        posicionSegundos = posicion,
+        posicionGlobalSegundos = global,
+        duracionSegundos = 47631.0,
         terminado = false,
-        actualizadoEn = actualizadoEn,
+        actualizadoEn = 0L,
         dispositivo = "PC",
     )
 
     @Test
     fun `sin fila remota manda siempre la local`() {
-        assertFalse(SupabaseSync.ganaLaRemota(null, ahora))
+        assertFalse(SupabaseSync.ganaLaRemota(null, 100.0))
     }
 
     @Test
-    fun `una escucha remota claramente posterior gana`() {
-        val diezMinutosDespues = ahora + 10 * 60_000
-        assertTrue(SupabaseSync.ganaLaRemota(remota(diezMinutosDespues), ahora))
+    fun `una escucha remota mas avanzada gana`() {
+        assertTrue(SupabaseSync.ganaLaRemota(remota(5000.0), 100.0))
     }
 
     @Test
-    fun `una escucha remota anterior no gana`() {
-        assertFalse(SupabaseSync.ganaLaRemota(remota(ahora - 60_000), ahora))
+    fun `una escucha remota mas atrasada no gana`() {
+        // Es el caso que de verdad importa: el movil no debe retroceder a la
+        // posicion vieja que quedo guardada en el ordenador.
+        assertFalse(SupabaseSync.ganaLaRemota(remota(100.0), 5000.0))
     }
 
     @Test
-    fun `un desfase de reloj menor de un minuto no hace saltar la posicion`() {
-        // Treinta segundos de diferencia son ruido entre dispositivos, no una
-        // escucha posterior: debe seguir mandando la local.
-        assertFalse(SupabaseSync.ganaLaRemota(remota(ahora + 30_000), ahora))
+    fun `una diferencia de segundos no hace saltar la reproduccion`() {
+        assertFalse(SupabaseSync.ganaLaRemota(remota(1003.0), 1000.0))
+        assertTrue(SupabaseSync.ganaLaRemota(remota(1006.0), 1000.0))
     }
 
     @Test
-    fun `el margen es estricto justo en el limite`() {
-        assertFalse(SupabaseSync.ganaLaRemota(remota(ahora + 60_000), ahora))
-        assertTrue(SupabaseSync.ganaLaRemota(remota(ahora + 60_001), ahora))
+    fun `en libros de varias pistas manda la posicion global`() {
+        // position es el segundo dentro de la pista; global_position, desde el
+        // inicio del libro. Comparar la primera daria un resultado absurdo.
+        assertTrue(SupabaseSync.ganaLaRemota(remota(posicion = 10.0, global = 9000.0), 1000.0))
     }
 }

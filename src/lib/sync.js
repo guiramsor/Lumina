@@ -9,6 +9,7 @@
  * igual que antes, en local.
  */
 import { createClient } from '@supabase/supabase-js'
+import { elegirCoincidencia, ganaLaRemota, toleranciaDuracion } from './emparejar.js'
 
 const URL = import.meta.env?.VITE_SUPABASE_URL || ''
 const KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || ''
@@ -91,17 +92,42 @@ function traducirError(mensaje) {
  * Devuelve null si no hay nada, si no hay sesión o si falla la red: la
  * sincronización nunca debe impedir escuchar.
  */
-export async function pullProgress(bookId) {
+const COLUMNAS =
+  'book_id, track_id, position, global_position, duration, finished, updated_at, device, title, author'
+
+/**
+ * Descarga la posición guardada de un libro.
+ *
+ * Primero por huella, que identifica copias idénticas. Si no hay fila —porque
+ * en el otro dispositivo el archivo tiene otra codificación o las etiquetas
+ * editadas— se busca por duración, según las reglas de docs/SYNC.md.
+ */
+export async function pullProgress(bookId, { duracion, titulo, autor } = {}) {
   const db = getClient()
   if (!db || !bookId) return null
   try {
     const { data, error } = await db
       .from('progress')
-      .select('book_id, track_id, position, global_position, duration, finished, updated_at, device')
+      .select(COLUMNAS)
       .eq('book_id', bookId)
       .maybeSingle()
     if (error) throw error
-    return data || null
+    if (data) return data
+
+    if (!duracion) return null
+    const margen = toleranciaDuracion(duracion)
+    const { data: candidatas, error: error2 } = await db
+      .from('progress')
+      .select(COLUMNAS)
+      .gte('duration', duracion - margen)
+      .lte('duration', duracion + margen)
+    if (error2) throw error2
+
+    const elegida = elegirCoincidencia(candidatas || [], { duracion, titulo, autor })
+    if (elegida) {
+      console.info('Libro emparejado por duración con', elegida.title, `(${elegida.device})`)
+    }
+    return elegida
   } catch (err) {
     console.warn('No se pudo leer el progreso remoto', err)
     return null
@@ -141,15 +167,17 @@ export async function pushProgress(entry) {
 }
 
 /**
- * Decide qué posición vale cuando hay una local y una remota: gana la más
- * reciente. El margen de 60 s evita que un pequeño desfase de reloj entre
- * dispositivos haga saltar la reproducción hacia atrás sin motivo.
+ * Decide qué posición vale cuando hay una local y una remota.
+ *
+ * Gana la escucha **más avanzada**, no la más reciente: así ningún dispositivo
+ * puede hacer retroceder lo escuchado en el otro, que es el error que de
+ * verdad duele. Ver docs/SYNC.md.
  */
 export function resolveProgress(local, remote) {
   if (!remote) return { winner: 'local', progress: local }
   if (!local) return { winner: 'remote', progress: remote }
-  const remoteAt = new Date(remote.updated_at).getTime()
-  const localAt = local.updatedAt || 0
-  if (remoteAt > localAt + 60_000) return { winner: 'remote', progress: remote }
+  const posLocal = local.globalTime ?? local.time ?? 0
+  const posRemota = remote.global_position ?? remote.position ?? 0
+  if (ganaLaRemota(posLocal, posRemota)) return { winner: 'remote', progress: remote }
   return { winner: 'local', progress: local }
 }

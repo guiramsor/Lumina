@@ -10,6 +10,7 @@ import {
 } from '../lib/db.js'
 import { ensureFingerprints, trackIndexByFingerprint } from '../lib/bookIdentity.js'
 import { pullProgress, pushProgress, resolveProgress, haySesion } from '../lib/sync.js'
+import { debeSubir } from '../lib/emparejar.js'
 
 /**
  * Smart rewind (estilo Audible): cuanto más tiempo lleves sin escuchar, más
@@ -99,6 +100,7 @@ export function PlayerProvider({ children }) {
   const speedRef = useRef(1)
   const lastPauseAtRef = useRef(null) // para el rebobinado inteligente
   const lastPushRef = useRef(0) // última subida a la nube
+  const remotePosRef = useRef(null) // última posición remota conocida del libro
   const statsRef = useRef({ pending: 0, lastTick: 0, lastFlush: 0 })
 
   const [book, setBook] = useState(null)
@@ -295,6 +297,8 @@ export function PlayerProvider({ children }) {
       if (!force && updatedAt - lastPushRef.current < 30_000) return
       // Sin sesión no hay nada que subir, y marcarlo como fallo sería mentir.
       if (!haySesion()) return
+      // No pisar una posición más avanzada guardada por el otro dispositivo.
+      if (!debeSubir(globalTime, remotePosRef.current, { terminado: finished })) return
       lastPushRef.current = updatedAt
       setSyncState('subiendo')
       pushProgress({
@@ -309,7 +313,11 @@ export function PlayerProvider({ children }) {
         updatedAt,
       }).then((bien) => {
         setSyncState(bien ? 'hecho' : 'fallo')
-        if (bien) setSyncedAt(Date.now())
+        if (bien) {
+          setSyncedAt(Date.now())
+          // Lo que acabamos de subir pasa a ser la referencia remota.
+          remotePosRef.current = globalTime
+        }
       })
     },
     []
@@ -388,8 +396,15 @@ export function PlayerProvider({ children }) {
       setBook(view)
 
       const local = await getProgress(identified.id)
-      // Si el otro dispositivo escuchó más tarde, su posición manda.
-      const remote = await pullProgress(view.fingerprint)
+      // Si el otro dispositivo llegó más lejos, su posición manda. La duración
+      // y las etiquetas permiten reconocer el libro aunque el archivo no sea
+      // idéntico al de este equipo.
+      const remote = await pullProgress(view.fingerprint, {
+        duracion: view.totalDuration,
+        titulo: view.title,
+        autor: view.author,
+      })
+      remotePosRef.current = remote ? remote.global_position ?? remote.position ?? 0 : null
       const { winner } = resolveProgress(local, remote)
 
       let startTrack = 0
