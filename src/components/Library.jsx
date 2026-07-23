@@ -3,11 +3,21 @@ import { motion, AnimatePresence } from 'framer-motion'
 import BookCard from './BookCard.jsx'
 import BookEditor from './BookEditor.jsx'
 import StatsPanel from './StatsPanel.jsx'
+import SyncPanel from './SyncPanel.jsx'
 import { buildBooksFromFiles } from '../lib/importBooks.js'
 import { getSettings, putSettings } from '../lib/db.js'
 import { THEMES } from '../lib/theme.js'
 import { formatTime } from '../lib/format.js'
-import { PlusIcon, BookIcon, PlayIcon, SearchIcon, ChartIcon, PaletteIcon, HelpIcon } from './Icons.jsx'
+import {
+  PlusIcon,
+  BookIcon,
+  PlayIcon,
+  SearchIcon,
+  ChartIcon,
+  PaletteIcon,
+  HelpIcon,
+  CloudIcon,
+} from './Icons.jsx'
 
 const collator = new Intl.Collator('es', { sensitivity: 'base', numeric: true })
 
@@ -46,6 +56,7 @@ export default function Library({
   const [sort, setSort] = useState('reciente')
   const [themeOpen, setThemeOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
+  const [syncOpen, setSyncOpen] = useState(false)
 
   useEffect(() => {
     getSettings().then((s) => setSort(s.librarySort || 'reciente'))
@@ -292,6 +303,9 @@ export default function Library({
           <button className="icon-btn ghost" title="Estadísticas de escucha" onClick={() => setStatsOpen(true)}>
             <ChartIcon size={19} />
           </button>
+          <button className="icon-btn ghost" title="Sincronización entre dispositivos" onClick={() => setSyncOpen(true)}>
+            <CloudIcon size={19} />
+          </button>
           <button className="icon-btn ghost" title="Atajos de teclado (?)" onClick={onShowHelp}>
             <HelpIcon size={19} />
           </button>
@@ -464,6 +478,8 @@ export default function Library({
       <AnimatePresence>
         {statsOpen && <StatsPanel books={books} onClose={() => setStatsOpen(false)} />}
       </AnimatePresence>
+
+      <AnimatePresence>{syncOpen && <SyncPanel onClose={() => setSyncOpen(false)} />}</AnimatePresence>
     </div>
   )
 }

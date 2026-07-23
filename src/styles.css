@@ -2207,3 +2207,69 @@ img {
   transform: scale(0.94);
 }
 
+
+/* ================= Sincronización ================= */
+.sync-card {
+  width: min(420px, 100%);
+}
+.sync-form,
+.sync-active {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sync-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.sync-form input {
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--stroke);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 400;
+  outline: none;
+  transition: border-color 0.18s ease;
+}
+.sync-form input:focus {
+  border-color: var(--accent);
+}
+.sync-hint {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.sync-hint-quiet {
+  font-size: 12px;
+  opacity: 0.75;
+}
+.sync-error {
+  font-size: 13px;
+  color: #ff8080;
+}
+.sync-state {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sync-state strong {
+  font-size: 15px;
+}
+.sync-state p {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.sync-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.16);
+  flex: none;
+}

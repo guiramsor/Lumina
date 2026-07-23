@@ -15,7 +15,9 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const EXE = path.join(root, 'dist-desktop', 'Lumina-win32-x64', 'Lumina.exe')
-const WATCHED = ['src', 'electron.js', 'index.html', 'package.json', 'vite.config.js']
+// .env.local entra aquí porque Vite incrusta sus valores en el build: cambiar
+// las credenciales de sincronización obliga a reempaquetar la aplicación.
+const WATCHED = ['src', 'electron.js', 'index.html', 'package.json', 'vite.config.js', '.env.local']
 
 const say = (systemMessage) => {
   process.stdout.write(JSON.stringify({ systemMessage, suppressOutput: true }))

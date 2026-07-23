@@ -8,6 +8,8 @@ import {
   putSettings,
   addListeningTime,
 } from '../lib/db.js'
+import { ensureFingerprints, trackIndexByFingerprint } from '../lib/bookIdentity.js'
+import { pullProgress, pushProgress, resolveProgress } from '../lib/sync.js'
 
 /**
  * Smart rewind (estilo Audible): cuanto más tiempo lleves sin escuchar, más
@@ -29,6 +31,19 @@ export function usePlayer() {
   const ctx = useContext(PlayerContext)
   if (!ctx) throw new Error('usePlayer debe usarse dentro de PlayerProvider')
   return ctx
+}
+
+/** Convierte un segundo global del libro en { index, local } de pista. */
+function locateGlobal(tracks, globalSeconds) {
+  let acc = 0
+  for (let i = 0; i < tracks.length; i++) {
+    const dur = tracks[i].duration || 0
+    if (globalSeconds < acc + dur || i === tracks.length - 1) {
+      return { index: i, local: Math.max(0, globalSeconds - acc) }
+    }
+    acc += dur
+  }
+  return { index: 0, local: 0 }
 }
 
 function makeBookView(rawBook) {
@@ -64,6 +79,7 @@ export function PlayerProvider({ children }) {
   const playbackRef = useRef({ trackIndex: 0, tracks: [] })
   const speedRef = useRef(1)
   const lastPauseAtRef = useRef(null) // para el rebobinado inteligente
+  const lastPushRef = useRef(0) // última subida a la nube
   const statsRef = useRef({ pending: 0, lastTick: 0, lastFlush: 0 })
 
   const [book, setBook] = useState(null)
@@ -200,7 +216,7 @@ export function PlayerProvider({ children }) {
         goToTrack(idx + 1, 0, true)
       } else {
         setIsPlaying(false)
-        persistProgress(audio.duration || 0, true)
+        persistProgress(audio.duration || 0, true, { force: true })
       }
     }
 
@@ -233,16 +249,37 @@ export function PlayerProvider({ children }) {
   }, [])
 
   const persistProgress = useCallback(
-    (time, finished = false) => {
+    (time, finished = false, { force = false } = {}) => {
       const view = bookViewRef.current
       if (!view) return
+      const trackIndex = playbackRef.current.trackIndex
+      const globalTime = trackOffsetsFor(view, trackIndex) + time
+      const updatedAt = Date.now()
+
       putProgress({
         bookId: view.id,
-        trackIndex: playbackRef.current.trackIndex,
+        trackIndex,
         time,
-        globalTime: (trackOffsetsFor(view, playbackRef.current.trackIndex)) + time,
+        globalTime,
         speed: speedRef.current,
         finished,
+      })
+
+      // La nube se actualiza mucho menos a menudo que el guardado local: cada
+      // 30 s mientras se escucha, y siempre al pausar o cerrar.
+      if (!view.fingerprint) return
+      if (!force && updatedAt - lastPushRef.current < 30_000) return
+      lastPushRef.current = updatedAt
+      pushProgress({
+        bookId: view.fingerprint,
+        trackId: view.tracks[trackIndex]?.fingerprint,
+        position: time,
+        globalPosition: globalTime,
+        duration: view.totalDuration,
+        finished,
+        title: view.title,
+        author: view.author,
+        updatedAt,
       })
     },
     []
@@ -302,25 +339,60 @@ export function PlayerProvider({ children }) {
       const audio = audioRef.current
       audio.pause()
 
-      const view = makeBookView(rawBook)
+      // La huella identifica el libro en la nube; se calcula una sola vez.
+      const identified = await ensureFingerprints(rawBook)
+      const view = makeBookView(identified)
       bookViewRef.current = view
       setBook(view)
 
-      const progress = await getProgress(rawBook.id)
+      const local = await getProgress(identified.id)
+      // Si el otro dispositivo escuchó más tarde, su posición manda.
+      const remote = await pullProgress(view.fingerprint)
+      const { winner } = resolveProgress(local, remote)
+
+      let startTrack = 0
+      let startTime = 0
+      let finished = false
+      let lastListenedAt = 0
+
+      if (winner === 'remote' && remote) {
+        finished = Boolean(remote.finished)
+        lastListenedAt = new Date(remote.updated_at).getTime()
+        // La pista se busca por huella: así la posición es exacta aunque cada
+        // dispositivo ordene los archivos de otra forma.
+        const idx = trackIndexByFingerprint(view, remote.track_id)
+        if (idx >= 0) {
+          startTrack = idx
+          startTime = remote.position || 0
+        } else {
+          const loc = locateGlobal(view.tracks, remote.global_position || 0)
+          startTrack = loc.index
+          startTime = loc.local
+        }
+      } else if (local) {
+        finished = Boolean(local.finished)
+        lastListenedAt = local.updatedAt || 0
+        startTrack = local.trackIndex ?? 0
+        startTime = local.time ?? 0
+      }
+
       // Un libro terminado se reabre desde el principio: no basta con poner el
       // tiempo a 0, hay que volver también a la primera pista.
-      const startTrack = progress?.finished ? 0 : progress?.trackIndex ?? 0
-      let startTime = progress?.finished ? 0 : progress?.time ?? 0
+      if (finished) {
+        startTrack = 0
+        startTime = 0
+      }
+
       // Rebobinado inteligente entre sesiones: retomar un poco antes de donde
       // se dejó, según cuánto tiempo haya pasado desde la última escucha.
-      if (startTime > 0 && progress?.updatedAt) {
-        startTime = Math.max(0, startTime - smartRewindSeconds(Date.now() - progress.updatedAt))
+      if (startTime > 0 && lastListenedAt) {
+        startTime = Math.max(0, startTime - smartRewindSeconds(Date.now() - lastListenedAt))
       }
       const safeTrack = Math.max(0, Math.min(startTrack, view.tracks.length - 1))
       lastPauseAtRef.current = null
 
       // Per-book playback speed: use the book's saved speed, else the last-used default.
-      const startSpeed = progress?.speed ?? speedRef.current
+      const startSpeed = local?.speed ?? speedRef.current
       setSpeedState(startSpeed)
       speedRef.current = startSpeed
 
@@ -343,7 +415,7 @@ export function PlayerProvider({ children }) {
   const unloadBook = useCallback(() => {
     const audio = audioRef.current
     audio.pause()
-    if (bookViewRef.current) persistProgress(audio.currentTime)
+    if (bookViewRef.current) persistProgress(audio.currentTime, false, { force: true })
     setIsPlaying(false)
   }, [persistProgress])
 
@@ -374,7 +446,7 @@ export function PlayerProvider({ children }) {
   const pause = useCallback(() => {
     const audio = audioRef.current
     audio?.pause()
-    persistProgress(audio?.currentTime || 0)
+    persistProgress(audio?.currentTime || 0, false, { force: true })
   }, [persistProgress])
 
   const togglePlay = useCallback(() => {
@@ -566,7 +638,7 @@ export function PlayerProvider({ children }) {
   useEffect(() => {
     const handler = () => {
       if (bookViewRef.current && audioRef.current) {
-        persistProgress(audioRef.current.currentTime)
+        persistProgress(audioRef.current.currentTime, false, { force: true })
       }
       flushStats()
     }

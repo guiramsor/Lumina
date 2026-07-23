@@ -1,5 +1,6 @@
 import { isAudioFile, parseAudioFile, extractPalette } from './metadata.js'
 import { isCueFile, readCueText, parseCueSheet } from './cue.js'
+import { fingerprintBook } from './fingerprint.js'
 import { putBook } from './db.js'
 
 const collator = new Intl.Collator('es', { numeric: true, sensitivity: 'base' })
@@ -149,6 +150,13 @@ async function buildOneBook(entries, fallbackImage, cueChapters) {
   const totalDuration = tracks.reduce((sum, t) => sum + (t.duration || 0), 0)
   const chapters = buildChapters(tracks, trackChapters)
 
+  // Huella del contenido: es lo que permite reconocer este mismo libro en el
+  // móvil, donde tendrá otro id local. Solo lee 2 MiB por archivo.
+  const { bookFingerprint, trackFingerprints } = await fingerprintBook(tracks.map((t) => t.blob))
+  tracks.forEach((t, i) => {
+    t.fingerprint = trackFingerprints[i]
+  })
+
   // Autodetectar el número dentro de la serie desde la carpeta: "[7] Título",
   // "7 - Título", "07. Título"…
   const dirName = parentDir(entries[0].file).split('/').pop() || ''
@@ -157,6 +165,7 @@ async function buildOneBook(entries, fallbackImage, cueChapters) {
 
   const book = {
     id: crypto.randomUUID(),
+    fingerprint: bookFingerprint,
     title: deriveTitle(entries),
     author: firstMeta.author || '',
     narrator: firstMeta.narrator || '',
