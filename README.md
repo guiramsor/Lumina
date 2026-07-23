@@ -1,35 +1,60 @@
-# Lumina 🎧
+# Lumina
 
-Reproductor de audiolibros de escritorio para Windows. Arrastra un MP3, un M4B o
-una carpeta de capítulos y Lumina lee las etiquetas, extrae la portada, ordena
-las pistas y recuerda dónde lo dejaste.
+Reproductor de audiolibros para **Windows y Android**, con la posición de
+escucha sincronizada entre ambos. Pausas en el ordenador a las siete horas,
+abres el móvil y sigue justo ahí.
 
-Construido con React 19 + Vite + Electron. Todo funciona sin conexión y nada sale
-de tu equipo: la biblioteca vive en IndexedDB, en local.
+Los audios **nunca salen de tus dispositivos**. Lo único que viaja por la red
+son unos pocos bytes con la posición.
+
+| | |
+| --- | --- |
+| **Escritorio** | React 19 + Vite + Electron · datos en IndexedDB |
+| **Móvil** | Kotlin + Jetpack Compose + Media3 · datos en local |
+| **Sincronización** | Supabase (opcional; sin ella todo funciona igual, solo que en local) |
 
 ## Características
 
-- **Importación inteligente** — archivos sueltos, carpetas o carpetas con varios
-  audiolibros dentro: se separan por subcarpeta y etiqueta de álbum, y se ordenan
-  con orden natural (`Capítulo 2` antes que `Capítulo 10`).
-- **Capítulos de verdad** — usa los capítulos embebidos del M4B; si no los hay,
-  lee una hoja `.cue` que acompañe al archivo; si tampoco, cada pista es un capítulo.
-- **Retoma donde lo dejaste** — progreso guardado por libro y *rebobinado
-  inteligente*: cuanto más tiempo pasa sin escuchar, más atrás retoma (de 5 a 30 s).
-- **Temporizador de sueño** — por minutos, con desvanecido en los últimos 12 s, o
-  «hasta el final del capítulo».
-- **Marcadores** con nota, lista de capítulos y estadísticas de escucha por día.
-- **Velocidad por libro** (0,5× a 3×), recordada de forma independiente para cada uno.
-- **Teclas multimedia del sistema** y controles en el overlay de Windows.
-- **Interfaz reactiva** — el color de la app se extrae de la portada del libro, con
-  cuatro temas (Noche, Medianoche, Brasa, Claro) y visualización en vinilo o libro 3D.
+### Comunes a las dos apps
+
+- **Biblioteca con portadas**, búsqueda y orden por recientes, título, autor o progreso.
+- **Continuar escuchando**: el último libro, con su portada y su porcentaje.
+- **Rebobinado inteligente** al estilo Audible: cuanto más tiempo llevas sin
+  escuchar, más atrás retoma para que recuperes el hilo (de 5 a 30 segundos).
+- **Velocidad por libro**, recordada de forma independiente para cada uno.
+- **Temporizador de sueño** con desvanecido en los últimos 12 segundos.
+- **Marcadores** con nota y **estadísticas** de escucha con racha de días.
+- **Teclas multimedia** del sistema y controles en la notificación u overlay.
+- **Color de la interfaz extraído de la portada** del libro en curso.
+
+### Solo en el escritorio
+
+- **Capítulos**: los embebidos del M4B o, si no los hay, una hoja `.cue` que
+  acompañe al archivo.
+- **Libros de varias pistas**: una carpeta de capítulos se agrupa como un libro.
+- **Cuatro temas** (Noche, Medianoche, Brasa, Claro) y fondo reactivo.
+- **Vinilo y libro 3D** como visualizaciones del reproductor.
+- **Editor de libro**: título, autor, serie y portada.
+- **Atajos de teclado**.
+
+### Solo en el móvil
+
+- **Reproducción en segundo plano** con la pantalla apagada, mediante un
+  servicio de medios propio.
+- **Biblioteca leída del teléfono** con MediaStore: concedes el permiso una vez
+  y aparecen todos tus audios, sin buscarlos en el selector de documentos.
+- **Deslizar hacia abajo** para releer la biblioteca.
 
 ## Instalación
 
-Descarga el `.exe` desde la [última release](../../releases/latest), descomprime y
-ejecuta `Lumina.exe`. No necesita instalador.
+**Windows** — descarga el zip de la [última release](../../releases/latest),
+descomprime y ejecuta `Lumina.exe`. No necesita instalador.
 
-O compílalo tú mismo:
+**Android** — no se publica APK en las releases: el que se compila en local
+lleva incrustadas las credenciales de Supabase. Compílalo tú con
+`cd android && ./gradlew installDebug`.
+
+O compila el escritorio tú mismo:
 
 ```bash
 npm install
@@ -38,26 +63,34 @@ npm run dist
 
 El ejecutable queda en `dist-desktop/Lumina-win32-x64/`.
 
-## Sincronización con el móvil
+## Sincronización entre dispositivos
 
-Lumina tiene una app Android nativa en [`android/`](android). Ambas guardan la
-posición de escucha en Supabase, así que puedes pausar en el ordenador a las
-cuatro horas y seguir en el móvil justo ahí.
+Cada dispositivo guarda su **propia copia** del archivo de audio. Los libros se
+emparejan por una **huella calculada del contenido**, no por su nombre ni sus
+etiquetas, así que la misma copia se reconoce en los dos sitios.
 
-Los **audios nunca se suben**: cada dispositivo usa su propia copia del
-archivo, y lo único que viaja son unos pocos bytes con la posición. Los libros
-se emparejan por una huella calculada del contenido del archivo, no por su
-nombre, así que la misma copia se reconoce en los dos sitios. El algoritmo, la
-tabla y las reglas están en [docs/SYNC.md](docs/SYNC.md).
-
-Para activarla: crea un proyecto en Supabase, ejecuta
-[`supabase/schema.sql`](supabase/schema.sql), copia `.env.example` a
-`.env.local` con tus credenciales y recompila. Sin ese archivo la app funciona
-igual, solo que en local.
-
-```bash
-cd android && ./gradlew installDebug
 ```
+huella de pista = SHA-256( primer MiB || último MiB || tamaño en ASCII )
+huella de libro = SHA-256( huellas de sus pistas, ordenadas y unidas por \n )
+```
+
+Solo se leen 2 MiB por archivo: un M4B de 1,76 GB se resuelve en unos 15 ms. El
+algoritmo, la tabla y las reglas de resolución de conflictos están en
+[docs/SYNC.md](docs/SYNC.md), y hay **vectores congelados** que verifican en CI
+que JavaScript y Kotlin producen los mismos hashes. Si dejaran de coincidir, los
+dos dispositivos no se reconocerían y la compilación falla antes de publicar.
+
+### Activarla
+
+1. Crea un proyecto gratuito en [supabase.com](https://supabase.com).
+2. En el SQL Editor, ejecuta [`supabase/schema.sql`](supabase/schema.sql).
+3. En Authentication → Users, créate un usuario.
+4. Copia `.env.example` a `.env.local` con las credenciales de tu proyecto
+   (Project Settings → API) y recompila.
+
+`.env.local` está en el `.gitignore`, así que tus credenciales no llegan al
+repositorio. Como consecuencia, **el `.exe` de las releases de GitHub sale sin
+sincronización**: solo la llevan las compilaciones locales.
 
 ## Desarrollo
 
@@ -65,18 +98,28 @@ cd android && ./gradlew installDebug
 npm run electron:dev
 ```
 
-Levanta Vite y abre Electron con recarga en caliente: los cambios en `src/` se ven
-al instante, sin recompilar.
+Levanta Vite y abre Electron con recarga en caliente: los cambios en `src/` se
+ven al instante, sin recompilar.
 
 | Script | Qué hace |
 | --- | --- |
 | `npm run electron:dev` | Vite + Electron con HMR (desarrollo diario) |
 | `npm run dev` | Solo Vite, para probar en el navegador |
+| `npm run test` | Tests de la huella de audiolibros |
 | `npm run electron:build` | Compila y abre Electron sobre el build de producción |
 | `npm run dist` | Genera el ejecutable en `dist-desktop/` |
-| `npm test` | Tests de la huella de audiolibros |
 
-## Atajos de teclado
+Para el móvil, desde `android/`:
+
+```bash
+./gradlew installDebug          # compilar e instalar en el dispositivo
+./gradlew testDebugUnitTest     # tests
+```
+
+Cada push a `main` compila el ejecutable de Windows y publica una release, y
+ejecuta los tests de las dos plataformas.
+
+## Atajos de teclado (escritorio)
 
 | Tecla | Acción |
 | --- | --- |
@@ -99,21 +142,33 @@ añadirse y fallar al reproducir.
 ## Estructura
 
 ```
-src/
-├── lib/            # Lógica pura, sin React
-│   ├── db.js           # IndexedDB: libros, progreso, marcadores, ajustes, stats
-│   ├── metadata.js     # Etiquetas, portada y extracción de la paleta de color
-│   ├── cue.js          # Lectura de hojas .cue
-│   ├── importBooks.js  # Agrupar archivos en libros
-│   └── theme.js        # Temas de la interfaz
-├── player/
-│   ├── PlayerContext.jsx      # Toda la máquina de reproducción
-│   └── useKeyboardShortcuts.js
-└── components/     # Biblioteca, reproductor y paneles
+src/                     # Aplicación de escritorio
+├── lib/                     # Lógica pura, sin React
+│   ├── db.js                    # IndexedDB: libros, progreso, marcadores, stats
+│   ├── metadata.js              # Etiquetas, portada y paleta de color
+│   ├── cue.js                   # Lectura de hojas .cue
+│   ├── importBooks.js           # Agrupar archivos en libros
+│   ├── fingerprint.js           # Identidad portable de los libros
+│   └── sync.js                  # Cliente de Supabase
+├── player/PlayerContext.jsx # Toda la máquina de reproducción
+└── components/              # Biblioteca, reproductor y paneles
+
+android/app/src/main/java/com/lumina/audiolibros/
+├── sync/                    # Huella (misma spec) y cliente REST de Supabase
+├── library/                 # MediaStore, etiquetas y portadas
+├── data/AlmacenLocal.kt     # Progreso, marcadores y estadísticas
+├── player/PlaybackService.kt# Servicio de medios en segundo plano
+└── ui/                      # Pantallas, iconos y tema
+
+docs/SYNC.md             # Contrato compartido entre ambas apps
+supabase/schema.sql      # Tabla de progreso con RLS
+test/                    # Tests de la huella, en Node y en la JVM
 ```
 
 ## Limitaciones conocidas
 
-- El audio importado se copia dentro de IndexedDB, así que ocupa el doble en disco.
-  Pendiente: guardar la ruta del archivo y reproducirlo por `file://`.
+- En el escritorio, el audio importado se copia dentro de IndexedDB, así que
+  ocupa el doble en disco. Pendiente: guardar la ruta y reproducir por `file://`.
+- El móvil trata cada archivo como un libro: no agrupa carpetas de capítulos ni
+  lee capítulos embebidos.
 - Solo se empaqueta para Windows x64.
