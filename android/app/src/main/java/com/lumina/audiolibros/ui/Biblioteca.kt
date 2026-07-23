@@ -92,8 +92,11 @@ fun Portada(ruta: String?, titulo: String, modifier: Modifier = Modifier) {
 fun PantallaBiblioteca(
     libros: List<Audiolibro>,
     progresos: Map<String, AlmacenLocal.Progreso>,
+    enCurso: Audiolibro?,
+    sonando: Boolean,
     refrescando: Boolean,
     onRefrescar: () -> Unit,
+    onContinuar: () -> Unit,
     onAbrir: (Audiolibro) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -114,9 +117,12 @@ fun PantallaBiblioteca(
         }
     }
 
-    // "Continuar escuchando": el libro con la escucha más reciente sin terminar.
-    val continuar = remember(libros, progresos) {
-        libros.filter { progresos[it.bookId]?.let { p -> !p.terminado && p.posicionMs > 0 } == true }
+    // "Continuar escuchando": el libro en curso manda; si no hay ninguno, el de
+    // la escucha más reciente. Así el bloque nunca se queda en un libro viejo
+    // después de abrir otro.
+    val continuar = remember(libros, progresos, enCurso) {
+        enCurso ?: libros
+            .filter { progresos[it.bookId]?.let { p -> !p.terminado && p.posicionMs > 0 } == true }
             .maxByOrNull { progresos[it.bookId]?.actualizadoEn ?: 0L }
     }
 
@@ -156,7 +162,15 @@ fun PantallaBiblioteca(
             ) {
                 if (continuar != null && busqueda.isBlank()) {
                     item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
-                        HeroContinuar(continuar, progresos[continuar.bookId], onAbrir)
+                        HeroContinuar(
+                            libro = continuar,
+                            progreso = progresos[continuar.bookId],
+                            // Si ya está cargado, abrir el reproductor sin
+                            // reiniciar la reproducción.
+                            enCurso = continuar == enCurso,
+                            sonando = sonando,
+                            onPulsar = { if (continuar == enCurso) onContinuar() else onAbrir(continuar) },
+                        )
                     }
                 }
                 items(visibles, key = { it.uri.toString() }) { libro ->
@@ -171,7 +185,9 @@ fun PantallaBiblioteca(
 private fun HeroContinuar(
     libro: Audiolibro,
     progreso: AlmacenLocal.Progreso?,
-    onAbrir: (Audiolibro) -> Unit,
+    enCurso: Boolean,
+    sonando: Boolean,
+    onPulsar: () -> Unit,
 ) {
     val pct = porcentaje(libro, progreso)
     Row(
@@ -179,13 +195,20 @@ private fun HeroContinuar(
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { onAbrir(libro) }
+            .clickable { onPulsar() }
             .padding(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Portada(libro.portada, libro.titulo, Modifier.size(72.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("CONTINUAR ESCUCHANDO", style = MaterialTheme.typography.labelSmall)
+            Text(
+                when {
+                    enCurso && sonando -> "▸ SONANDO AHORA"
+                    enCurso -> "EN PAUSA"
+                    else -> "CONTINUAR ESCUCHANDO"
+                },
+                style = MaterialTheme.typography.labelSmall,
+            )
             Text(
                 libro.titulo,
                 style = MaterialTheme.typography.titleSmall,

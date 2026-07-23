@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -83,10 +84,18 @@ fun LuminaApp(modifier: Modifier = Modifier) {
         if (permisoConcedido) cargar()
     }
 
-    // Refrescar las barras de progreso al volver del reproductor.
-    LaunchedEffect(pantalla) {
-        if (pantalla == Pantalla.BIBLIOTECA) progresos = AlmacenLocal.progresos(context)
+    // Las barras y el bloque de "continuar escuchando" se releen al volver del
+    // reproductor y mientras suena algo, para que reflejen siempre la escucha
+    // más reciente sin tener que salir y entrar.
+    LaunchedEffect(pantalla, estado.sonando) {
+        while (true) {
+            if (pantalla == Pantalla.BIBLIOTECA) progresos = AlmacenLocal.progresos(context)
+            kotlinx.coroutines.delay(2_000)
+        }
     }
+
+    // Deslizar hacia atrás vuelve a la biblioteca; ya en ella, cierra la app.
+    BackHandler(enabled = pantalla != Pantalla.BIBLIOTECA) { pantalla = Pantalla.BIBLIOTECA }
 
     when (pantalla) {
         Pantalla.REPRODUCTOR -> {
@@ -131,23 +140,6 @@ fun LuminaApp(modifier: Modifier = Modifier) {
             }
         }
 
-        if (estado.libro != null) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { pantalla = Pantalla.REPRODUCTOR }) {
-                    Text("▸ ${estado.libro!!.titulo}", style = MaterialTheme.typography.labelLarge)
-                }
-                Button(onClick = { estado.alternar() }) {
-                    Text(if (estado.sonando) "Pausar" else "Seguir")
-                }
-            }
-        }
-
         if (!permisoConcedido) {
             Column(
                 Modifier.fillMaxSize(),
@@ -172,8 +164,13 @@ fun LuminaApp(modifier: Modifier = Modifier) {
         PantallaBiblioteca(
             libros = biblioteca,
             progresos = progresos,
+            // El libro en curso encabeza siempre "continuar escuchando", aunque
+            // todavía no le haya dado tiempo a guardar progreso.
+            enCurso = estado.libro,
+            sonando = estado.sonando,
             refrescando = refrescando,
             onRefrescar = { alcance.launch { cargar() } },
+            onContinuar = { pantalla = Pantalla.REPRODUCTOR },
             onAbrir = { libro ->
                 estado.abrir(libro) { progresos = AlmacenLocal.progresos(context) }
                 pantalla = Pantalla.REPRODUCTOR

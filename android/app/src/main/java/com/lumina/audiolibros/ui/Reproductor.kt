@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,6 +39,44 @@ import java.util.UUID
 
 private val MINUTOS_SUENO = listOf(5, 10, 15, 30, 45, 60)
 
+/**
+ * Aviso discreto de si la posición llegó a la nube. Se mantiene deliberadamente
+ * pequeño: es información de fondo, no algo que deba competir con el libro.
+ */
+@Composable
+private fun IndicadorSincronizacion(estado: EstadoReproductor) {
+    // Se recalcula solo mientras la pantalla esté viva, para que el "hace un
+    // momento" no se quede congelado.
+    var ahora by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(estado.sincronizadoEn) {
+        while (true) {
+            ahora = System.currentTimeMillis()
+            kotlinx.coroutines.delay(5_000)
+        }
+    }
+
+    val (simbolo, texto) = when (estado.estadoSync) {
+        EstadoSync.SUBIENDO -> "○" to "Guardando posición…"
+        EstadoSync.FALLO -> "⚠" to "Sin conexión: se guardó en el móvil"
+        EstadoSync.HECHO -> {
+            val hace = estado.sincronizadoEn?.let { (ahora - it) / 1000 } ?: 0
+            "✓" to when {
+                hace < 10 -> "Posición sincronizada"
+                hace < 60 -> "Sincronizado hace ${hace}s"
+                else -> "Sincronizado hace ${hace / 60} min"
+            }
+        }
+        EstadoSync.INACTIVO -> return
+    }
+
+    Text(
+        "$simbolo  $texto",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
+}
+
 @Composable
 fun PantallaReproductor(
     estado: EstadoReproductor,
@@ -46,6 +85,9 @@ fun PantallaReproductor(
 ) {
     val context = LocalContext.current
     val libro = estado.libro ?: return
+
+    // Deslizar hacia atrás vuelve a la biblioteca, no cierra la app.
+    BackHandler { onVolver() }
     var arrastrando by remember { mutableStateOf<Float?>(null) }
     var panel by remember { mutableStateOf<String?>(null) }
     var marcadores by remember { mutableStateOf(AlmacenLocal.marcadores(context, libro.bookId)) }
@@ -82,6 +124,8 @@ fun PantallaReproductor(
         estado.aviso?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
         }
+
+        IndicadorSincronizacion(estado)
 
         // Barra de progreso arrastrable.
         val duracion = estado.duracionMs.coerceAtLeast(1L)

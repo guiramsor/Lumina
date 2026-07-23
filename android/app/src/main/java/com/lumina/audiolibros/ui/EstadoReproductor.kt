@@ -53,6 +53,9 @@ val VELOCIDADES = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f)
 /** Modo del temporizador de sueño. */
 enum class ModoSueno { NINGUNO, MINUTOS }
 
+/** Para poder mostrar sin ruido si la posición llegó o no a la nube. */
+enum class EstadoSync { INACTIVO, SUBIENDO, HECHO, FALLO }
+
 /**
  * Estado central de la reproducción: la versión Android del PlayerContext.
  * Reúne el reproductor, el almacén local y la sincronización, para que las
@@ -76,6 +79,11 @@ class EstadoReproductor(
     var modoSueno by mutableStateOf(ModoSueno.NINGUNO)
         private set
     var suenoRestanteS by mutableIntStateOf(0)
+
+    var estadoSync by mutableStateOf(EstadoSync.INACTIVO)
+        private set
+    var sincronizadoEn by mutableStateOf<Long?>(null)
+        private set
 
     private var ultimaPausaEn: Long? = null
     private var ultimaSubida = 0L
@@ -232,9 +240,11 @@ class EstadoReproductor(
 
         // La nube se actualiza mucho menos a menudo que el disco local.
         if (!forzar && ahora - ultimaSubida < 30_000) return
+        if (!SupabaseSync.haySesion(context)) return
         ultimaSubida = ahora
+        estadoSync = EstadoSync.SUBIENDO
         alcance.launch {
-            SupabaseSync.subir(
+            val bien = SupabaseSync.subir(
                 context,
                 SupabaseSync.Progreso(
                     bookId = actual.bookId,
@@ -248,6 +258,8 @@ class EstadoReproductor(
                 ),
                 actual.titulo,
             )
+            estadoSync = if (bien) EstadoSync.HECHO else EstadoSync.FALLO
+            if (bien) sincronizadoEn = System.currentTimeMillis()
         }
     }
 
