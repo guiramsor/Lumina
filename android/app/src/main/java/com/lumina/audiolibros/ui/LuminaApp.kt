@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.os.Build
+import android.os.Bundle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -20,8 +21,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -48,6 +51,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.lumina.audiolibros.library.AudioLibrary
 import com.lumina.audiolibros.library.Audiolibro
+import com.lumina.audiolibros.player.EXTRA_TRACK_ID
 import com.lumina.audiolibros.player.PlaybackService
 import com.lumina.audiolibros.sync.Fingerprint
 import com.lumina.audiolibros.sync.SupabaseSync
@@ -59,6 +63,7 @@ import kotlinx.coroutines.withContext
 
 private const val INTERVALO_SUBIDA_MS = 30_000L
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LuminaApp(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -78,6 +83,15 @@ fun LuminaApp(modifier: Modifier = Modifier) {
     var duracion by remember { mutableLongStateOf(0L) }
     var aviso by remember { mutableStateOf<String?>(null) }
     var cargando by remember { mutableStateOf(false) }
+    var refrescando by remember { mutableStateOf(false) }
+
+    // Releer la biblioteca del teléfono: recoge los libros añadidos o borrados
+    // desde fuera de la app.
+    suspend fun refrescarBiblioteca() {
+        refrescando = true
+        biblioteca = withContext(Dispatchers.IO) { AudioLibrary.listar(context) }
+        refrescando = false
+    }
 
     val pedirPermisos = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -160,15 +174,20 @@ fun LuminaApp(modifier: Modifier = Modifier) {
 
             val remoto = bookId?.let { SupabaseSync.descargar(context, it) }
 
+            // La identidad viaja dentro del MediaItem para que el servicio
+            // pueda guardar la posición al cerrar la app, cuando esta pantalla
+            // ya no existe.
             c.setMediaItem(
                 MediaItem.Builder()
                     .setUri(libro.uri)
+                    .setMediaId(bookId.orEmpty())
                     .setMediaMetadata(
                         MediaMetadata.Builder()
                             .setTitle(libro.titulo)
                             .setArtist("Audiolibro")
                             .setIsPlayable(true)
                             .setIsBrowsable(false)
+                            .setExtras(Bundle().apply { putString(EXTRA_TRACK_ID, huellaPista) })
                             .build()
                     )
                     .build()
@@ -267,24 +286,30 @@ fun LuminaApp(modifier: Modifier = Modifier) {
             }
         }
 
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(biblioteca, key = { it.uri.toString() }) { libro ->
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { abrir(libro) }
-                        .padding(vertical = 12.dp)
-                ) {
-                    Text(libro.titulo, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
-                    Text(
-                        buildString {
-                            append(formatearTiempo(libro.duracionMs))
-                            if (libro.carpeta.isNotEmpty()) append(" · ${libro.carpeta.trimEnd('/')}")
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+        PullToRefreshBox(
+            isRefreshing = refrescando,
+            onRefresh = { alcance.launch { refrescarBiblioteca() } },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(biblioteca, key = { it.uri.toString() }) { libro ->
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { abrir(libro) }
+                            .padding(vertical = 12.dp)
+                    ) {
+                        Text(libro.titulo, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+                        Text(
+                            buildString {
+                                append(formatearTiempo(libro.duracionMs))
+                                if (libro.carpeta.isNotEmpty()) append(" · ${libro.carpeta.trimEnd('/')}")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    HorizontalDivider()
                 }
-                HorizontalDivider()
             }
         }
     }
