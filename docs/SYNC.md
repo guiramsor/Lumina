@@ -52,6 +52,16 @@ La implementación en Kotlin **debe** reproducir estos valores. Están fijados e
 | Archivo de 10 bytes `00 01 02 03 04 05 06 07 08 09` | `83fe3c54f403ec66e809df9dceb0f308fa20394de604b54e9c1a59d805e2e5b7` |
 | Libro con pistas `00×32` y `ff×32` (en hex) | `f7ee6e27721feb087d5ad6f99251059d05183104ae909d2b9830b12cadd4f822` |
 
+El algoritmo ya está verificado en la JVM, que es lo que ejecutará Android:
+`test/jvm/Huella.java` reproduce los vectores y, si se le pasa la ruta de un
+audio, su huella. Sobre `El Ritmo de la Guerra` (1,76 GB) las tres
+implementaciones —la app, los tests de Node y la JVM— coinciden en
+`518b995ad39e66aa7f480ba96c1df69e48d0541ecdd72b47af8c76783b53388e`.
+
+```
+"E:\AppLibrary\AndroidStudio\jbr\bin\java.exe" test/jvm/Huella.java [ruta-de-un-audio]
+```
+
 ## Almacenamiento
 
 Tabla `public.progress` en Supabase (esquema completo en `supabase/schema.sql`).
