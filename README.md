@@ -165,10 +165,20 @@ supabase/schema.sql      # Tabla de progreso con RLS
 test/                    # Tests de la huella, en Node y en la JVM
 ```
 
+## Dónde viven los audios
+
+Ninguna de las dos apps copia tus audiolibros: **se reproducen desde donde
+están**. En el escritorio la biblioteca guarda la ruta del archivo y un
+protocolo propio, `lumina://`, lo sirve con soporte de rangos, que es lo que
+permite saltar a la hora siete de un archivo de 1,7 GB sin leerlo entero.
+
+Si mueves o borras un audio, el libro te avisa al abrirlo. Reimportarlo desde
+su nueva ubicación lo actualiza en su sitio: como los libros se identifican por
+su huella, conservas el progreso y los marcadores en lugar de crear un
+duplicado.
+
 ## Limitaciones conocidas
 
-- En el escritorio, el audio importado se copia dentro de IndexedDB, así que
-  ocupa el doble en disco. Pendiente: guardar la ruta y reproducir por `file://`.
 - El móvil trata cada archivo como un libro: no agrupa carpetas de capítulos ni
   lee capítulos embebidos.
 - Solo se empaqueta para Windows x64.

@@ -7,12 +7,13 @@
   "scripts": {
     "dev": "vite",
     "test": "node --test test/*.test.mjs",
+    "test:protocolo": "electron test/electron/protocolo.mjs",
     "build": "vite build",
     "preview": "vite preview --host",
     "electron:start": "electron .",
     "electron:dev": "node scripts/dev.mjs",
     "electron:build": "vite build && electron .",
-    "dist": "vite build && electron-packager . Lumina --platform=win32 --arch=x64 --icon=assets/icon.ico --out=dist-desktop --overwrite --ignore=\"/(src|scripts|vite\\.config\\.js|build-ico|dist-desktop|\\.git|\\.gitignore|\\.antigravitycli|\\.claude)/\""
+    "dist": "vite build && electron-packager . Lumina --platform=win32 --arch=x64 --icon=assets/icon.ico --out=dist-desktop --overwrite --ignore=\"^/(src|scripts|test|docs|android|supabase|audios|dist-desktop|\\.git|\\.github|\\.gitignore|\\.claude|\\.antigravitycli|\\.env|vite\\.config\\.js|build-ico\\.cjs|README\\.md|Lumina\\.lnk|package-lock\\.json)\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",

@@ -16,6 +16,9 @@ export async function ensureFingerprints(book) {
   if (!book?.tracks?.length) return book
   const completo = book.fingerprint && book.tracks.every((t) => t.fingerprint)
   if (completo) return book
+  // Los libros que guardan la ruta en vez de los bytes reciben su huella al
+  // importarse; aquí solo se completan los antiguos, que sí llevan blob.
+  if (!book.tracks.every((t) => t.blob)) return book
 
   try {
     const { bookFingerprint, trackFingerprints } = await fingerprintBook(book.tracks.map((t) => t.blob))

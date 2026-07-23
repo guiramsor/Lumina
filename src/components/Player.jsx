@@ -51,8 +51,18 @@ function SyncBadge() {
 }
 
 export default function Player({ onBack }) {
-  const { book, chapters, currentChapter, visualMode, setVisualMode, isPlaying, sleep, globalTime, totalDuration } =
-    usePlayer()
+  const {
+    book,
+    chapters,
+    currentChapter,
+    visualMode,
+    setVisualMode,
+    isPlaying,
+    sleep,
+    globalTime,
+    totalDuration,
+    missingFiles,
+  } = usePlayer()
   const [panel, setPanel] = useState(null)
 
   if (!book) return null
@@ -134,6 +144,12 @@ export default function Player({ onBack }) {
           <p className="player-chapter">{currentChapter.title}</p>
         )}
         <p className="player-remaining">Quedan {formatTime(remainingTotal)}</p>
+        {missingFiles.length > 0 && (
+          <p className="player-missing" title={missingFiles.join('\n')}>
+            No se encuentra el archivo de audio. ¿Lo has movido o borrado? Vuelve a importarlo
+            desde su nueva ubicación.
+          </p>
+        )}
       </div>
 
       <Controls />

@@ -45,6 +45,11 @@ jobs:
       - name: Tests
         run: npm test
 
+      # Sirve los audiolibros desde su ubicación original. Si los rangos o los
+      # permisos del esquema se rompen, el audio deja de sonar sin dar error.
+      - name: Test del protocolo de audio
+        run: npm run test:protocolo
+
       - name: Empaquetar la aplicación
         run: npm run dist
 

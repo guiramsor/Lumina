@@ -1,7 +1,7 @@
 import { isAudioFile, parseAudioFile, extractPalette } from './metadata.js'
 import { isCueFile, readCueText, parseCueSheet } from './cue.js'
 import { fingerprintBook } from './fingerprint.js'
-import { putBook } from './db.js'
+import { putBook, findBookByFingerprint } from './db.js'
 
 const collator = new Intl.Collator('es', { numeric: true, sensitivity: 'base' })
 
@@ -128,10 +128,15 @@ async function buildOneBook(entries, fallbackImage, cueChapters) {
 
   for (const { file, meta } of entries) {
     if (!coverBlob && meta.picture) coverBlob = meta.picture
+    // Se guarda la ruta, no los bytes: copiar el audio dentro de IndexedDB
+    // duplicaba en disco toda la biblioteca. Si no hay ruta disponible (por
+    // ejemplo en el navegador, fuera de Electron) se recurre al archivo.
+    const ruta = window.lumina?.rutaDeArchivo?.(file) || null
     tracks.push({
       name: file.name,
       title: meta.title,
-      blob: file,
+      ruta,
+      blob: ruta ? undefined : file,
       type: file.type || 'audio/mpeg',
       duration: meta.duration || 0,
     })
@@ -152,7 +157,9 @@ async function buildOneBook(entries, fallbackImage, cueChapters) {
 
   // Huella del contenido: es lo que permite reconocer este mismo libro en el
   // móvil, donde tendrá otro id local. Solo lee 2 MiB por archivo.
-  const { bookFingerprint, trackFingerprints } = await fingerprintBook(tracks.map((t) => t.blob))
+  // Se calcula sobre los archivos originales: las pistas ya no llevan sus
+  // bytes, solo la ruta.
+  const { bookFingerprint, trackFingerprints } = await fingerprintBook(entries.map((e) => e.file))
   tracks.forEach((t, i) => {
     t.fingerprint = trackFingerprints[i]
   })
@@ -163,20 +170,28 @@ async function buildOneBook(entries, fallbackImage, cueChapters) {
   const idxMatch = dirName.match(/^\[?(\d{1,3})\]?[\s._-]+\S/)
   const seriesIndex = idxMatch ? Number(idxMatch[1]) : null
 
+  // Reimportar un libro que ya estaba (misma huella) lo actualiza en vez de
+  // duplicarlo, conservando su id y con él su progreso y sus marcadores. Es
+  // además la vía para migrar los libros antiguos, que guardaban los bytes.
+  const anterior = await findBookByFingerprint(bookFingerprint)
+
   const book = {
-    id: crypto.randomUUID(),
+    id: anterior?.id || crypto.randomUUID(),
     fingerprint: bookFingerprint,
-    title: deriveTitle(entries),
-    author: firstMeta.author || '',
-    narrator: firstMeta.narrator || '',
-    series: '',
-    seriesIndex,
-    coverBlob,
-    palette,
+    // Lo que el usuario haya cambiado a mano en el editor manda sobre lo que
+    // digan las etiquetas: reimportar no debe deshacer sus correcciones.
+    title: anterior?.title || deriveTitle(entries),
+    author: anterior?.author || firstMeta.author || '',
+    narrator: anterior?.narrator || firstMeta.narrator || '',
+    series: anterior?.series || '',
+    seriesIndex: anterior?.seriesIndex ?? seriesIndex,
+    coverFit: anterior?.coverFit,
+    coverBlob: anterior?.coverBlob || coverBlob,
+    palette: anterior?.coverBlob ? anterior.palette : palette,
     tracks,
     chapters,
     totalDuration,
-    addedAt: Date.now(),
+    addedAt: anterior?.addedAt || Date.now(),
     lastOpened: Date.now(),
   }
 

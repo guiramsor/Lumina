@@ -1,47 +1,15 @@
-import { app, BrowserWindow, Menu, screen } from 'electron';
+import { app, BrowserWindow, Menu, screen, protocol, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { registrarEsquema, servirAudio } from './audioProtocol.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow;
 
-const stateFile = () => path.join(app.getPath('userData'), 'window-state.json');
-
-function loadWindowState() {
-  try {
-    const state = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
-    // Solo restaurar si la posición guardada sigue siendo visible en algún monitor
-    const visible = screen.getAllDisplays().some((d) => {
-      const a = d.workArea;
-      return (
-        state.x >= a.x - 100 &&
-        state.y >= a.y - 50 &&
-        state.x < a.x + a.width - 100 &&
-        state.y < a.y + a.height - 100
-      );
-    });
-    if (!visible) return { maximized: state.maximized };
-    return state;
-  } catch {
-    return {};
-  }
-}
-
-function saveWindowState() {
-  if (!mainWindow) return;
-  try {
-    const bounds = mainWindow.isMaximized() ? mainWindow.getNormalBounds() : mainWindow.getBounds();
-    fs.writeFileSync(
-      stateFile(),
-      JSON.stringify({ ...bounds, maximized: mainWindow.isMaximized() })
-    );
-  } catch {
-    /* ignorar: perder el estado de la ventana no es crítico */
-  }
-}
+registrarEsquema();
 
 function createWindow() {
   const state = loadWindowState();
@@ -59,7 +27,9 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      // Solo para resolver la ruta de los archivos que elige el usuario.
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
 
@@ -93,6 +63,16 @@ function createWindow() {
 
 // Inicializar la aplicación cuando esté lista
 app.whenReady().then(() => {
+  protocol.handle('lumina', servirAudio);
+
+  ipcMain.handle('lumina:existe', (_evento, ruta) => {
+    try {
+      return typeof ruta === 'string' && fs.statSync(ruta).isFile();
+    } catch {
+      return false;
+    }
+  });
+
   createWindow();
 
   app.on('activate', () => {

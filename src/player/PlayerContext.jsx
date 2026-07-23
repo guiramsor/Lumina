@@ -46,19 +46,33 @@ function locateGlobal(tracks, globalSeconds) {
   return { index: 0, local: 0 }
 }
 
+/**
+ * URL con la que reproducir una pista.
+ *
+ * Los libros importados a partir de ahora guardan la ruta del archivo y se
+ * sirven por el protocolo `lumina://`, sin copiar nada. Los importados antes
+ * llevan los bytes dentro de IndexedDB y siguen funcionando con un blob, para
+ * no romper una biblioteca ya existente.
+ */
+function urlDePista(track) {
+  if (track.ruta && window.lumina?.urlDeAudio) return window.lumina.urlDeAudio(track.ruta)
+  if (track.blob) return URL.createObjectURL(track.blob)
+  return null
+}
+
 function makeBookView(rawBook) {
   const coverUrl = rawBook.coverBlob ? URL.createObjectURL(rawBook.coverBlob) : null
-  const tracks = rawBook.tracks.map((t) => ({
-    ...t,
-    url: URL.createObjectURL(t.blob),
-  }))
+  const tracks = rawBook.tracks.map((t) => ({ ...t, url: urlDePista(t) }))
   return { ...rawBook, coverUrl, tracks }
 }
 
 function revokeBookView(view) {
   if (!view) return
   if (view.coverUrl) URL.revokeObjectURL(view.coverUrl)
-  view.tracks?.forEach((t) => t.url && URL.revokeObjectURL(t.url))
+  // Solo hay que liberar los blobs; las URLs `lumina://` no reservan memoria.
+  view.tracks?.forEach((t) => {
+    if (t.blob && t.url?.startsWith('blob:')) URL.revokeObjectURL(t.url)
+  })
 }
 
 export function PlayerProvider({ children }) {
@@ -96,6 +110,8 @@ export function PlayerProvider({ children }) {
   // 'inactivo' | 'subiendo' | 'hecho' | 'fallo'
   const [syncState, setSyncState] = useState('inactivo')
   const [syncedAt, setSyncedAt] = useState(null)
+  // Archivos del libro actual que ya no están en su sitio.
+  const [missingFiles, setMissingFiles] = useState([])
 
   const trackOffsets = useMemo(() => {
     if (!book) return []
@@ -350,6 +366,18 @@ export function PlayerProvider({ children }) {
 
       // La huella identifica el libro en la nube; se calcula una sola vez.
       const identified = await ensureFingerprints(rawBook)
+
+      // Si el audio se movió o se borró, avisar en vez de fallar en silencio.
+      const rutas = identified.tracks.map((t) => t.ruta).filter(Boolean)
+      if (rutas.length && window.lumina?.existe) {
+        const faltan = []
+        for (const ruta of rutas) {
+          if (!(await window.lumina.existe(ruta))) faltan.push(ruta)
+        }
+        setMissingFiles(faltan)
+      } else {
+        setMissingFiles([])
+      }
       const view = makeBookView(identified)
       bookViewRef.current = view
       setBook(view)
@@ -751,6 +779,7 @@ export function PlayerProvider({ children }) {
     settingsLoaded,
     syncState,
     syncedAt,
+    missingFiles,
     // controls
     loadBook,
     unloadBook,

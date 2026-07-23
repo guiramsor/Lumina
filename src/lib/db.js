@@ -45,6 +45,14 @@ export async function getBook(id) {
   return db.get('books', id)
 }
 
+/** Busca un libro por su huella de contenido, para no duplicarlo al reimportarlo. */
+export async function findBookByFingerprint(fingerprint) {
+  if (!fingerprint) return null
+  const db = await getDB()
+  const books = await db.getAll('books')
+  return books.find((b) => b.fingerprint === fingerprint) || null
+}
+
 export async function putBook(book) {
   const db = await getDB()
   await db.put('books', book)
