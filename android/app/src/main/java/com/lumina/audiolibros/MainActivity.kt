@@ -2,10 +2,12 @@ package com.lumina.audiolibros
 
 import android.Manifest
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -33,7 +35,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -117,6 +121,22 @@ fun ReproductorScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    // Recuperar el último audio abierto: sin esto, cada reinicio obliga a
+    // volver a buscarlo en el selector.
+    LaunchedEffect(controller) {
+        val c = controller ?: return@LaunchedEffect
+        if (c.mediaItemCount > 0) {
+            nombreArchivo = c.currentMediaItem?.mediaMetadata?.title?.toString()
+            return@LaunchedEffect
+        }
+        ultimaUri(context)?.let { uri ->
+            val nombre = nombreVisible(context, uri)
+            nombreArchivo = nombre
+            c.setMediaItem(itemDe(uri, nombre))
+            c.prepare()
+        }
+    }
+
     val elegirAudio = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -126,9 +146,11 @@ fun ReproductorScreen(modifier: Modifier = Modifier) {
             uri,
             Intent.FLAG_GRANT_READ_URI_PERMISSION
         )
-        nombreArchivo = uri.lastPathSegment
+        recordarUri(context, uri)
+        val nombre = nombreVisible(context, uri)
+        nombreArchivo = nombre
         controller?.apply {
-            setMediaItem(MediaItem.fromUri(uri))
+            setMediaItem(itemDe(uri, nombre))
             prepare()
             play()
         }
@@ -163,6 +185,59 @@ fun ReproductorScreen(modifier: Modifier = Modifier) {
             Text(if (sonando) "Pausar" else "Reproducir")
         }
     }
+}
+
+/**
+ * Sin metadatos la notificación sale sin título, y el stack de Bluetooth
+ * inunda el log con "Timeout while waiting for metadata to sync".
+ */
+private fun itemDe(uri: Uri, nombre: String): MediaItem =
+    MediaItem.Builder()
+        .setUri(uri)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(nombre)
+                .setArtist("Audiolibro")
+                .setIsPlayable(true)
+                .setIsBrowsable(false)
+                .build()
+        )
+        .build()
+
+private const val PREFS = "lumina"
+private const val CLAVE_ULTIMA_URI = "ultima_uri"
+
+private fun recordarUri(context: Context, uri: Uri) {
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(CLAVE_ULTIMA_URI, uri.toString())
+        .apply()
+}
+
+/** Última URI abierta, solo si aún conservamos permiso persistente sobre ella. */
+private fun ultimaUri(context: Context): Uri? {
+    val guardada = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getString(CLAVE_ULTIMA_URI, null) ?: return null
+    val uri = guardada.toUri()
+    val tienePermiso = context.contentResolver.persistedUriPermissions
+        .any { it.uri == uri && it.isReadPermission }
+    return if (tienePermiso) uri else null
+}
+
+/**
+ * Nombre legible de un documento elegido con el selector. El último segmento
+ * de una URI de SAF es un identificador interno, no sirve para mostrar.
+ */
+private fun nombreVisible(context: Context, uri: Uri): String {
+    context.contentResolver
+        .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nombre = cursor.getString(0)
+                if (!nombre.isNullOrBlank()) return nombre
+            }
+        }
+    return uri.lastPathSegment ?: "Audio"
 }
 
 private fun formatearTiempo(ms: Long): String {
