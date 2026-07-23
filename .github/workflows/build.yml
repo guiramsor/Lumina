@@ -15,6 +15,20 @@ permissions:
   contents: write
 
 jobs:
+  # Los vectores de la huella deben coincidir en las dos plataformas: si esto
+  # falla, movil y escritorio han dejado de reconocer los mismos libros.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Tests de la app Android
+        working-directory: android
+        run: ./gradlew testDebugUnitTest --console=plain
+
   windows:
     runs-on: windows-latest
 

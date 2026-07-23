@@ -1,7 +1,19 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Las credenciales de Supabase se leen del mismo .env.local que usa la app de
+// escritorio, para no tener dos sitios donde mantenerlas. Ese archivo esta en
+// .gitignore, asi que una compilacion sin el produce una app sin
+// sincronizacion, pero perfectamente funcional en local.
+val entorno = Properties().apply {
+    val archivo = rootProject.file("../.env.local")
+    if (archivo.exists()) archivo.inputStream().use { load(it) }
+}
+fun entorno(clave: String): String = entorno.getProperty(clave, "").trim()
 
 android {
     namespace = "com.lumina.audiolibros"
@@ -19,6 +31,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "SUPABASE_URL", "\"${entorno("VITE_SUPABASE_URL")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${entorno("VITE_SUPABASE_ANON_KEY")}\"")
     }
 
     buildTypes {
@@ -34,6 +49,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

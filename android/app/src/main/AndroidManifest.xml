@@ -9,6 +9,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Solo para sincronizar la posicion con Supabase: el audio nunca sale del movil. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Leer los audiolibros ya presentes en el telefono. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

@@ -38,6 +38,27 @@ npm run dist
 
 El ejecutable queda en `dist-desktop/Lumina-win32-x64/`.
 
+## Sincronización con el móvil
+
+Lumina tiene una app Android nativa en [`android/`](android). Ambas guardan la
+posición de escucha en Supabase, así que puedes pausar en el ordenador a las
+cuatro horas y seguir en el móvil justo ahí.
+
+Los **audios nunca se suben**: cada dispositivo usa su propia copia del
+archivo, y lo único que viaja son unos pocos bytes con la posición. Los libros
+se emparejan por una huella calculada del contenido del archivo, no por su
+nombre, así que la misma copia se reconoce en los dos sitios. El algoritmo, la
+tabla y las reglas están en [docs/SYNC.md](docs/SYNC.md).
+
+Para activarla: crea un proyecto en Supabase, ejecuta
+[`supabase/schema.sql`](supabase/schema.sql), copia `.env.example` a
+`.env.local` con tus credenciales y recompila. Sin ese archivo la app funciona
+igual, solo que en local.
+
+```bash
+cd android && ./gradlew installDebug
+```
+
 ## Desarrollo
 
 ```bash
@@ -53,6 +74,7 @@ al instante, sin recompilar.
 | `npm run dev` | Solo Vite, para probar en el navegador |
 | `npm run electron:build` | Compila y abre Electron sobre el build de producción |
 | `npm run dist` | Genera el ejecutable en `dist-desktop/` |
+| `npm test` | Tests de la huella de audiolibros |
 
 ## Atajos de teclado
 
