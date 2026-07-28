@@ -24,6 +24,7 @@ object AlmacenLocal {
     private const val MARCADORES = "marcadores"
     private const val ESTADISTICAS = "estadisticas"
     private const val AJUSTES = "ajustes"
+    private const val SYNC_IDS = "sync_ids"
 
     data class Progreso(
         val bookId: String,
@@ -86,6 +87,20 @@ object AlmacenLocal {
         return todos.keys().asSequence().mapNotNull { id ->
             progreso(context, id)?.let { id to it }
         }.toMap()
+    }
+
+    /* ---------------- Identidad en la nube ---------------- */
+
+    /**
+     * Fila de la nube en la que vive un libro. Puede no coincidir con su
+     * huella: cuando este móvil reconoce el libro del ordenador adopta el
+     * identificador de aquel, para que los dos escriban en el mismo sitio.
+     */
+    fun syncId(context: Context, bookId: String): String? =
+        objeto(context, SYNC_IDS).optString(bookId).takeIf { it.isNotEmpty() }
+
+    fun guardarSyncId(context: Context, bookId: String, syncId: String) {
+        guardar(context, SYNC_IDS, objeto(context, SYNC_IDS).put(bookId, syncId))
     }
 
     /* ---------------- Marcadores ---------------- */

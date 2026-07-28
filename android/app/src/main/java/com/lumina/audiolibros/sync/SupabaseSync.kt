@@ -120,57 +120,96 @@ object SupabaseSync {
      * sobrescribir una posición que no hemos llegado a leer, o una lectura
      * fallida borraría el avance hecho en el otro dispositivo.
      */
-    suspend fun descargar(
+    /** Dónde vive este libro en la nube, y su posición guardada. */
+    data class Reconciliacion(val syncId: String, val progreso: Progreso?)
+
+    /**
+     * Averigua en qué fila de la nube vive este libro, y deja solo una.
+     *
+     * La huella identifica el archivo, distinto en cada dispositivo si las
+     * copias no son idénticas. El `syncId` identifica la fila compartida: en
+     * cuanto un dispositivo reconoce el libro del otro adopta su
+     * identificador, y los dos escriben en el mismo sitio. Sin esto cada uno
+     * seguiría en su propia fila y no volverían a encontrarse.
+     */
+    suspend fun reconciliar(
         context: Context,
-        bookId: String,
+        fingerprint: String,
+        syncId: String? = null,
         duracionSegundos: Double = 0.0,
         titulo: String? = null,
         autor: String? = null,
-    ): Result<Progreso?> = withContext(Dispatchers.IO) {
-        if (!configurado()) return@withContext Result.success(null)
+    ): Result<Reconciliacion> = withContext(Dispatchers.IO) {
+        val porDefecto = Reconciliacion(syncId ?: fingerprint, null)
+        if (!configurado()) return@withContext Result.success(porDefecto)
         val acceso = token(context)
             ?: return@withContext Result.failure(Exception("Sin sesión"))
-        runCatching {
-            val filtro = URLEncoder.encode("eq.$bookId", "UTF-8")
-            val cuerpo = peticion(
-                metodo = "GET",
-                ruta = "/rest/v1/progress?book_id=$filtro&select=*",
-                cuerpo = null,
-                token = acceso,
-            )
-            val filas = JSONArray(cuerpo)
-            if (filas.length() > 0) return@runCatching leerFila(filas.getJSONObject(0))
 
-            // Sin fila para esta huella: el mismo libro puede estar en el otro
-            // dispositivo con otra codificación o las etiquetas editadas. Se
-            // busca por duración, que es lo que no cambia.
-            if (duracionSegundos <= 0) return@runCatching null
+        runCatching {
+            // Camino rápido: el libro ya sabe dónde vive.
+            if (syncId != null) {
+                val filtro = URLEncoder.encode("eq.$syncId", "UTF-8")
+                val filas = JSONArray(
+                    peticion("GET", "/rest/v1/progress?book_id=$filtro&select=*", null, acceso)
+                )
+                if (filas.length() > 0) {
+                    return@runCatching Reconciliacion(syncId, leerFila(filas.getJSONObject(0)))
+                }
+            }
+
+            if (duracionSegundos <= 0) return@runCatching porDefecto
+
             val margen = EmparejarLibros.toleranciaDuracion(duracionSegundos)
             val desde = URLEncoder.encode("gte.${duracionSegundos - margen}", "UTF-8")
             val hasta = URLEncoder.encode("lte.${duracionSegundos + margen}", "UTF-8")
             val porDuracion = JSONArray(
-                peticion(
-                    metodo = "GET",
-                    ruta = "/rest/v1/progress?duration=$desde&duration=$hasta&select=*",
-                    cuerpo = null,
-                    token = acceso,
-                )
+                peticion("GET", "/rest/v1/progress?duration=$desde&duration=$hasta&select=*", null, acceso)
             )
             val candidatas = (0 until porDuracion.length()).map { porDuracion.getJSONObject(it) }
-            val elegida = EmparejarLibros.elegirCoincidencia(
+
+            val grupo = EmparejarLibros.agruparMismoLibro(
                 filas = candidatas,
+                idsPropios = listOfNotNull(fingerprint, syncId),
                 duracion = duracionSegundos,
                 titulo = titulo,
                 autor = autor,
+                idDe = { it.getString("book_id") },
                 duracionDe = { it.optDouble("duration").takeIf { d -> !d.isNaN() } },
                 tituloDe = { it.optString("title") },
                 autorDe = { it.optString("author") },
             )
-            elegida?.let {
-                android.util.Log.i("LuminaSync", "Libro emparejado por duración con ${it.optString("title")}")
-                leerFila(it)
+            if (grupo.isEmpty()) return@runCatching porDefecto
+
+            val canonica = EmparejarLibros.elegirCanonica(grupo) { it.getString("book_id") }!!
+            val idCanonico = canonica.getString("book_id")
+            val avanzada = grupo.maxByOrNull { posicionDe(it) }!!
+            val sobrantes = grupo.map { it.getString("book_id") }.filter { it != idCanonico }
+
+            // Varias filas del mismo libro: se conserva la posición más
+            // avanzada en la canónica y se retiran las demás, que solo
+            // servirían para volver a dividir la sincronización.
+            if (sobrantes.isNotEmpty()) {
+                if (avanzada.getString("book_id") != idCanonico) {
+                    val fusion = JSONObject(avanzada.toString())
+                        .put("book_id", idCanonico)
+                        .put("updated_at", iso8601(System.currentTimeMillis()))
+                    peticion(
+                        "POST", "/rest/v1/progress", JSONArray().put(fusion).toString(), acceso,
+                        mapOf("Prefer" to "resolution=merge-duplicates,return=minimal"),
+                    )
+                }
+                val lista = URLEncoder.encode("in.(${sobrantes.joinToString(",")})", "UTF-8")
+                peticion("DELETE", "/rest/v1/progress?book_id=$lista", null, acceso)
+                android.util.Log.i("LuminaSync", "Fusionadas ${sobrantes.size + 1} filas en $idCanonico")
             }
-        }.onFailure { android.util.Log.w("LuminaSync", "No se pudo leer el progreso remoto", it) }
+
+            Reconciliacion(idCanonico, leerFila(avanzada).copy(bookId = idCanonico))
+        }.onFailure { android.util.Log.w("LuminaSync", "No se pudo reconciliar el libro", it) }
+    }
+
+    private fun posicionDe(fila: JSONObject): Double {
+        val global = fila.optDouble("global_position", 0.0)
+        return if (global > 0) global else fila.optDouble("position", 0.0)
     }
 
     private fun leerFila(fila: JSONObject) = Progreso(

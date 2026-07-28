@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, useCal
 import {
   getProgress,
   putProgress,
+  updateBook,
   putBookSpeed,
   touchBook,
   getSettings,
@@ -9,7 +10,7 @@ import {
   addListeningTime,
 } from '../lib/db.js'
 import { ensureFingerprints, trackIndexByFingerprint } from '../lib/bookIdentity.js'
-import { pullProgress, pushProgress, resolveProgress, haySesion } from '../lib/sync.js'
+import { reconciliarLibro, pushProgress, resolveProgress, haySesion } from '../lib/sync.js'
 import { debeSubir } from '../lib/emparejar.js'
 
 /**
@@ -101,6 +102,7 @@ export function PlayerProvider({ children }) {
   const lastPauseAtRef = useRef(null) // para el rebobinado inteligente
   const lastPushRef = useRef(0) // última subida a la nube
   const remotePosRef = useRef(null) // última posición remota conocida del libro
+  const syncIdRef = useRef(null) // fila de la nube en la que vive este libro
   const statsRef = useRef({ pending: 0, lastTick: 0, lastFlush: 0 })
 
   const [book, setBook] = useState(null)
@@ -293,7 +295,10 @@ export function PlayerProvider({ children }) {
 
       // La nube se actualiza mucho menos a menudo que el guardado local: cada
       // 30 s mientras se escucha, y siempre al pausar o cerrar.
-      if (!view.fingerprint) return
+      // Se escribe en la fila compartida, no en la de la huella de este
+      // archivo: es lo que mantiene a los dos dispositivos en el mismo sitio.
+      const idNube = syncIdRef.current || view.fingerprint
+      if (!idNube) return
       if (!force && updatedAt - lastPushRef.current < 30_000) return
       // Sin sesión no hay nada que subir, y marcarlo como fallo sería mentir.
       if (!haySesion()) return
@@ -302,7 +307,7 @@ export function PlayerProvider({ children }) {
       lastPushRef.current = updatedAt
       setSyncState('subiendo')
       pushProgress({
-        bookId: view.fingerprint,
+        bookId: idNube,
         trackId: view.tracks[trackIndex]?.fingerprint,
         position: time,
         globalPosition: globalTime,
@@ -396,14 +401,21 @@ export function PlayerProvider({ children }) {
       setBook(view)
 
       const local = await getProgress(identified.id)
-      // Si el otro dispositivo llegó más lejos, su posición manda. La duración
-      // y las etiquetas permiten reconocer el libro aunque el archivo no sea
-      // idéntico al de este equipo.
-      const remote = await pullProgress(view.fingerprint, {
+      // Averigua en qué fila de la nube vive este libro. Si el archivo de este
+      // equipo no es idéntico al del móvil, lo reconoce por duración y adopta
+      // su identificador, para que los dos escriban en la misma fila.
+      const { syncId, progreso: remote } = await reconciliarLibro({
+        fingerprint: view.fingerprint,
+        syncId: identified.syncId,
         duracion: view.totalDuration,
         titulo: view.title,
         autor: view.author,
       })
+      syncIdRef.current = syncId
+      if (syncId && syncId !== identified.syncId) {
+        updateBook(identified.id, { syncId })
+        view.syncId = syncId
+      }
       remotePosRef.current = remote ? remote.global_position ?? remote.position ?? 0 : null
       const { winner } = resolveProgress(local, remote)
 

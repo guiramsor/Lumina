@@ -9,7 +9,13 @@
  * igual que antes, en local.
  */
 import { createClient } from '@supabase/supabase-js'
-import { elegirCoincidencia, ganaLaRemota, toleranciaDuracion } from './emparejar.js'
+import {
+  agruparMismoLibro,
+  elegirCanonica,
+  filaMasAvanzada,
+  ganaLaRemota,
+  toleranciaDuracion,
+} from './emparejar.js'
 
 const URL = import.meta.env?.VITE_SUPABASE_URL || ''
 const KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || ''
@@ -95,42 +101,85 @@ function traducirError(mensaje) {
 const COLUMNAS =
   'book_id, track_id, position, global_position, duration, finished, updated_at, device, title, author'
 
-/**
- * Descarga la posición guardada de un libro.
- *
- * Primero por huella, que identifica copias idénticas. Si no hay fila —porque
- * en el otro dispositivo el archivo tiene otra codificación o las etiquetas
- * editadas— se busca por duración, según las reglas de docs/SYNC.md.
- */
-export async function pullProgress(bookId, { duracion, titulo, autor } = {}) {
+/** Lectura directa de la fila de un libro por su identificador de sincronización. */
+export async function pullProgress(syncId) {
   const db = getClient()
-  if (!db || !bookId) return null
+  if (!db || !syncId) return null
   try {
-    const { data, error } = await db
-      .from('progress')
-      .select(COLUMNAS)
-      .eq('book_id', bookId)
-      .maybeSingle()
+    const { data, error } = await db.from('progress').select(COLUMNAS).eq('book_id', syncId).maybeSingle()
     if (error) throw error
-    if (data) return data
+    return data || null
+  } catch (err) {
+    console.warn('No se pudo leer el progreso remoto', err)
+    return null
+  }
+}
 
-    if (!duracion) return null
+/**
+ * Averigua en qué fila de la nube vive este libro, y deja solo una.
+ *
+ * La huella identifica el archivo, que es distinto en cada dispositivo si las
+ * copias no son idénticas. El `syncId` identifica la fila compartida: en
+ * cuanto un dispositivo reconoce el libro del otro, adopta su identificador y
+ * los dos escriben en el mismo sitio. Sin esto, cada uno seguiría escribiendo
+ * en su propia fila y no volverían a encontrarse nunca.
+ *
+ * Devuelve `{ syncId, progreso, fusionadas }`. Nunca lanza: quedarse sin
+ * sincronizar es aceptable, no poder escuchar no.
+ */
+export async function reconciliarLibro({ fingerprint, syncId, duracion, titulo, autor }) {
+  const db = getClient()
+  const porDefecto = { syncId: syncId || fingerprint, progreso: null, fusionadas: 0 }
+  if (!db || !fingerprint) return porDefecto
+
+  try {
+    // Camino rápido: el libro ya sabe dónde vive.
+    if (syncId) {
+      const fila = await pullProgress(syncId)
+      if (fila) return { syncId, progreso: fila, fusionadas: 0 }
+    }
+
+    if (!duracion) return porDefecto
+
     const margen = toleranciaDuracion(duracion)
-    const { data: candidatas, error: error2 } = await db
+    const { data, error } = await db
       .from('progress')
       .select(COLUMNAS)
       .gte('duration', duracion - margen)
       .lte('duration', duracion + margen)
-    if (error2) throw error2
+    if (error) throw error
 
-    const elegida = elegirCoincidencia(candidatas || [], { duracion, titulo, autor })
-    if (elegida) {
-      console.info('Libro emparejado por duración con', elegida.title, `(${elegida.device})`)
+    const idsPropios = [fingerprint, syncId].filter(Boolean)
+    const grupo = agruparMismoLibro(data || [], { idsPropios, duracion, titulo, autor })
+    if (!grupo.length) return porDefecto
+
+    const canonica = elegirCanonica(grupo)
+    const avanzada = filaMasAvanzada(grupo)
+    const sobrantes = grupo.filter((f) => f.book_id !== canonica.book_id)
+
+    // Varias filas para el mismo libro: se conserva la posición más avanzada
+    // en la canónica y se retiran las demás, que solo servirían para volver a
+    // dividir la sincronización más adelante.
+    if (sobrantes.length) {
+      if (avanzada.book_id !== canonica.book_id) {
+        await db.from('progress').upsert(
+          { ...avanzada, book_id: canonica.book_id, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id,book_id' }
+        )
+      }
+      await db
+        .from('progress')
+        .delete()
+        .in('book_id', sobrantes.map((f) => f.book_id))
+      console.info(`Fusionadas ${sobrantes.length + 1} filas del mismo libro en ${canonica.book_id}`)
     }
-    return elegida
+
+    const progreso =
+      avanzada.book_id === canonica.book_id ? avanzada : { ...avanzada, book_id: canonica.book_id }
+    return { syncId: canonica.book_id, progreso, fusionadas: sobrantes.length }
   } catch (err) {
-    console.warn('No se pudo leer el progreso remoto', err)
-    return null
+    console.warn('No se pudo reconciliar el libro con la nube', err)
+    return porDefecto
   }
 }
 

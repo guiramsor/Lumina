@@ -65,6 +65,52 @@ object EmparejarLibros {
     }
 
     /**
+     * Reúne todas las filas remotas que son este mismo libro.
+     *
+     * `idsPropios` son los identificadores con los que este dispositivo ha
+     * escrito alguna vez. Sus filas entran al grupo siempre; las ajenas solo
+     * si el emparejamiento es inequívoco.
+     */
+    fun <T> agruparMismoLibro(
+        filas: List<T>,
+        idsPropios: List<String>,
+        duracion: Double,
+        titulo: String?,
+        autor: String?,
+        idDe: (T) -> String,
+        duracionDe: (T) -> Double?,
+        tituloDe: (T) -> String?,
+        autorDe: (T) -> String?,
+    ): List<T> {
+        if (filas.isEmpty() || duracion <= 0) return emptyList()
+
+        val tolerancia = toleranciaDuracion(duracion)
+        val enVentana = filas.filter { f ->
+            duracionDe(f)?.let { kotlin.math.abs(it - duracion) <= tolerancia } == true
+        }
+        val propias = enVentana.filter { idDe(it) in idsPropios }
+        val ajenas = enVentana.filter { idDe(it) !in idsPropios }
+
+        if (ajenas.size == 1) return propias + ajenas.first()
+        if (ajenas.size > 1) {
+            val clave = claveBlanda(titulo, autor)
+            val porClave = ajenas.filter { claveBlanda(tituloDe(it), autorDe(it)) == clave }
+            // Ante la ambigüedad no se toca ninguna ajena.
+            if (porClave.size == 1) return propias + porClave.first()
+        }
+        return propias
+    }
+
+    /**
+     * Fila a la que escribirán todos los dispositivos de aquí en adelante.
+     *
+     * Se elige el identificador menor, criterio determinista: los dos
+     * dispositivos llegan a la misma fila sin hablar entre ellos.
+     */
+    fun <T> elegirCanonica(grupo: List<T>, idDe: (T) -> String): T? =
+        grupo.minByOrNull { idDe(it) }
+
+    /**
      * ¿Gana la posición remota?
      *
      * Gana la escucha **más avanzada**, no la más reciente: así ningún

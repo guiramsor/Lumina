@@ -65,6 +65,56 @@ export function elegirCoincidencia(filas, { duracion, titulo, autor }) {
 }
 
 /**
+ * Reúne todas las filas remotas que son este mismo libro.
+ *
+ * `idsPropios` son los identificadores con los que este dispositivo ha escrito
+ * alguna vez (su huella y, si ya lo adoptó, el identificador compartido). Sus
+ * filas entran al grupo siempre; las ajenas solo si el emparejamiento es
+ * inequívoco, con el mismo criterio que `elegirCoincidencia`.
+ */
+export function agruparMismoLibro(filas, { idsPropios = [], duracion, titulo, autor }) {
+  if (!filas?.length || !duracion) return []
+
+  const tolerancia = toleranciaDuracion(duracion)
+  const enVentana = filas.filter(
+    (f) => f.duration != null && Math.abs(f.duration - duracion) <= tolerancia
+  )
+  const propias = enVentana.filter((f) => idsPropios.includes(f.book_id))
+  const ajenas = enVentana.filter((f) => !idsPropios.includes(f.book_id))
+
+  if (ajenas.length === 1) return [...propias, ajenas[0]]
+  if (ajenas.length > 1) {
+    const clave = claveBlanda(titulo, autor)
+    const porClave = ajenas.filter((f) => claveBlanda(f.title, f.author) === clave)
+    // Si sigue habiendo ambigüedad no se toca ninguna ajena: mejor quedarse
+    // sin sincronizar que fusionar dos libros distintos.
+    if (porClave.length === 1) return [...propias, porClave[0]]
+  }
+  return propias
+}
+
+/**
+ * Fila a la que escribirán todos los dispositivos de aquí en adelante.
+ *
+ * Se elige el identificador menor, que es un criterio determinista: los dos
+ * dispositivos llegan a la misma fila sin hablar entre ellos. Cualquier otro
+ * criterio (el más reciente, el más avanzado) haría que cada uno eligiera una
+ * distinta y seguirían sin encontrarse.
+ */
+export function elegirCanonica(grupo) {
+  if (!grupo?.length) return null
+  return grupo.reduce((a, b) => (a.book_id <= b.book_id ? a : b))
+}
+
+/** Posición más avanzada del grupo, para no perder nada al fusionar. */
+export function filaMasAvanzada(grupo) {
+  if (!grupo?.length) return null
+  return grupo.reduce((a, b) =>
+    (b.global_position ?? b.position ?? 0) > (a.global_position ?? a.position ?? 0) ? b : a
+  )
+}
+
+/**
  * ¿Gana la posición remota?
  *
  * Gana la escucha **más avanzada**, no la más reciente: así ningún dispositivo

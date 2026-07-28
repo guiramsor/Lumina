@@ -22,6 +22,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.library.Audiolibro
+import com.lumina.audiolibros.player.EXTRA_SYNC_ID
 import com.lumina.audiolibros.player.EXTRA_TRACK_ID
 import com.lumina.audiolibros.player.PlaybackService
 import com.lumina.audiolibros.sync.EmparejarLibros
@@ -104,6 +105,8 @@ class EstadoReproductor(
     private var lecturaRemotaFiable = false
     /** Ultima posicion remota conocida del libro abierto, en segundos. */
     private var posicionRemotaConocida: Double? = null
+    /** Fila de la nube en la que vive el libro abierto. */
+    private var syncIdActual: String? = null
 
     /* ---------------- Abrir ---------------- */
 
@@ -115,17 +118,22 @@ class EstadoReproductor(
         lecturaRemotaFiable = false
         alcance.launch {
             val local = AlmacenLocal.progreso(context, elegido.bookId)
-            // La duración y las etiquetas permiten reconocer el libro aunque
-            // el archivo del ordenador no sea idéntico al de este móvil.
-            val lectura = SupabaseSync.descargar(
+            // Averigua en qué fila de la nube vive el libro. La duración y las
+            // etiquetas lo reconocen aunque el archivo del ordenador no sea
+            // idéntico al de este móvil, y entonces se adopta su identificador.
+            val lectura = SupabaseSync.reconciliar(
                 context,
-                elegido.bookId,
+                fingerprint = elegido.bookId,
+                syncId = AlmacenLocal.syncId(context, elegido.bookId),
                 duracionSegundos = elegido.duracionMs / 1000.0,
                 titulo = elegido.titulo,
                 autor = elegido.autor,
             )
-            val remoto = lectura.getOrNull()
+            val remoto = lectura.getOrNull()?.progreso
             lecturaRemotaFiable = lectura.isSuccess
+            val idNube = lectura.getOrNull()?.syncId ?: elegido.bookId
+            syncIdActual = idNube
+            AlmacenLocal.guardarSyncId(context, elegido.bookId, idNube)
             posicionRemotaConocida = remoto?.let {
                 if (it.posicionGlobalSegundos > 0) it.posicionGlobalSegundos else it.posicionSegundos
             }
@@ -172,7 +180,15 @@ class EstadoReproductor(
                         .setArtist(elegido.autor.ifEmpty { "Audiolibro" })
                         .setIsPlayable(true)
                         .setIsBrowsable(false)
-                        .setExtras(Bundle().apply { putString(EXTRA_TRACK_ID, elegido.trackId) })
+                        .setExtras(
+                            Bundle().apply {
+                                putString(EXTRA_TRACK_ID, elegido.trackId)
+                                // El servicio guarda al cerrar la app, cuando
+                                // esta clase ya no existe: necesita saber en
+                                // qué fila escribir.
+                                putString(EXTRA_SYNC_ID, idNube)
+                            }
+                        )
                         .build()
                 )
                 .build()
@@ -304,7 +320,7 @@ class EstadoReproductor(
             val bien = SupabaseSync.subir(
                 context,
                 SupabaseSync.Progreso(
-                    bookId = actual.bookId,
+                    bookId = syncIdActual ?: actual.bookId,
                     trackId = actual.trackId,
                     posicionSegundos = posicion / 1000.0,
                     posicionGlobalSegundos = posicion / 1000.0,

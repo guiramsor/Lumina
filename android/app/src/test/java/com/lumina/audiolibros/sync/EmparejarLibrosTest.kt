@@ -79,6 +79,59 @@ class EmparejarLibrosTest {
         assertEquals(47631.0, elegir(listOf(Fila(47631.0, "a", "")), 47700.0, "a", "")?.duracion)
     }
 
+    /* ---------------- Agrupar el mismo libro ---------------- */
+
+    private data class FilaId(
+        val id: String,
+        val duracion: Double?,
+        val titulo: String = "X",
+        val autor: String = "Y",
+    )
+
+    private fun agrupar(filas: List<FilaId>, propios: List<String>, duracion: Double, titulo: String, autor: String) =
+        EmparejarLibros.agruparMismoLibro(
+            filas, propios, duracion, titulo, autor,
+            idDe = { it.id }, duracionDe = { it.duracion },
+            tituloDe = { it.titulo }, autorDe = { it.autor },
+        )
+
+    @Test
+    fun `agrupa la fila ajena que es el mismo libro`() {
+        val grupo = agrupar(listOf(FilaId("ajena", 47630.0)), listOf("mia"), 47631.0, "X", "Y")
+        assertEquals(listOf("ajena"), grupo.map { it.id })
+    }
+
+    @Test
+    fun `agrupa la propia y la ajena cuando existen las dos`() {
+        val filas = listOf(FilaId("mia", 47631.0), FilaId("ajena", 47630.0))
+        val grupo = agrupar(filas, listOf("mia"), 47631.0, "X", "Y")
+        assertEquals(listOf("ajena", "mia"), grupo.map { it.id }.sorted())
+    }
+
+    @Test
+    fun `no agrupa filas de otra duracion`() {
+        val filas = listOf(FilaId("mia", 47631.0), FilaId("otroLibro", 12000.0))
+        assertEquals(listOf("mia"), agrupar(filas, listOf("mia"), 47631.0, "X", "Y").map { it.id })
+    }
+
+    @Test
+    fun `ante dos ajenas ambiguas no se agrupa ninguna`() {
+        val filas = listOf(
+            FilaId("mia", 47631.0),
+            FilaId("ajena1", 47630.0, "Elantris", "S"),
+            FilaId("ajena2", 47635.0, "Trenza", "S"),
+        )
+        assertEquals(listOf("mia"), agrupar(filas, listOf("mia"), 47631.0, "Otro", "S").map { it.id })
+    }
+
+    @Test
+    fun `la fila canonica es la misma se mire desde donde se mire`() {
+        val a = FilaId("aaa", 47631.0)
+        val b = FilaId("zzz", 47631.0)
+        assertEquals("aaa", EmparejarLibros.elegirCanonica(listOf(a, b)) { it.id }?.id)
+        assertEquals("aaa", EmparejarLibros.elegirCanonica(listOf(b, a)) { it.id }?.id)
+    }
+
     /* ---------------- Resolución de posiciones ---------------- */
 
     @Test

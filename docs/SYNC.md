@@ -98,6 +98,30 @@ Una fila por cuenta y libro:
    por su `track_id` y se salta a `position`. `global_position` es solo
    informativo, porque depende del orden de las pistas.
 
+## Dos identidades distintas: la huella y el `syncId`
+
+Conviene no confundirlas, porque el error de mezclarlas rompe la
+sincronización de una forma que no da la cara:
+
+- **La huella** identifica *un archivo concreto*. Dos copias del mismo
+  audiolibro con distinta codificación tienen huellas distintas.
+- **El `syncId`** identifica *la fila de la nube* donde vive ese libro. Es lo
+  que ambos dispositivos deben compartir.
+
+Al principio el `syncId` de un libro es su propia huella. Cuando un
+dispositivo reconoce por duración el libro del otro, **adopta el `syncId`
+ajeno** y lo guarda: a partir de ahí los dos escriben en la misma fila.
+
+Sin esa adopción, reconocer el libro serviría para leer una vez y nada más:
+al guardar, cada dispositivo crearía su propia fila con su propia huella y no
+volverían a encontrarse nunca.
+
+Si al reconciliar aparecen varias filas del mismo libro (por ejemplo porque
+los dos dispositivos escucharon sin conexión antes de verse), se conserva la
+posición más avanzada y se retiran las sobrantes. La fila que se conserva es
+la del **identificador menor**, criterio determinista para que los dos
+dispositivos elijan la misma sin hablar entre ellos.
+
 ## Emparejar el mismo libro en archivos distintos
 
 La huella identifica copias idénticas byte a byte. Pero el mismo audiolibro

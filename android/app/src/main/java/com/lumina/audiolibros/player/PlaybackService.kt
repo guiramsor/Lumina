@@ -20,6 +20,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 /** Clave con la que la pantalla adjunta la huella de la pista al MediaItem. */
 const val EXTRA_TRACK_ID = "lumina_track_id"
 
+/** Fila de la nube del libro: puede no coincidir con la huella del archivo. */
+const val EXTRA_SYNC_ID = "lumina_sync_id"
+
 /**
  * Servicio de reproducción.
  *
@@ -71,7 +74,9 @@ class PlaybackService : MediaSessionService() {
         }
 
         val item = player.currentMediaItem
-        val bookId = item?.mediaId?.takeIf { it.isNotEmpty() }
+        // La fila compartida manda sobre la huella de este archivo.
+        val bookId = item?.mediaMetadata?.extras?.getString(EXTRA_SYNC_ID)
+            ?: item?.mediaId?.takeIf { it.isNotEmpty() }
         val trackId = item?.mediaMetadata?.extras?.getString(EXTRA_TRACK_ID)
         val titulo = item?.mediaMetadata?.title?.toString()
         val posicionMs = player.currentPosition

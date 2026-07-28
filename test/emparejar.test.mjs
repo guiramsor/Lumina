@@ -4,6 +4,9 @@ import {
   normalizarTexto,
   claveBlanda,
   elegirCoincidencia,
+  agruparMismoLibro,
+  elegirCanonica,
+  filaMasAvanzada,
   ganaLaRemota,
   debeSubir,
 } from '../src/lib/emparejar.js'
@@ -58,6 +61,76 @@ test('la tolerancia crece con la duracion pero nunca baja de diez segundos', () 
   assert.equal(elegirCoincidencia([fila(120)], { duracion: 128, titulo: 'a', autor: '' })?.duration, 120)
   assert.equal(elegirCoincidencia([fila(120)], { duracion: 145, titulo: 'a', autor: '' }), null)
   assert.equal(elegirCoincidencia([fila(47631)], { duracion: 47700, titulo: 'a', autor: '' })?.duration, 47631)
+})
+
+/* ---------------- Agrupar el mismo libro ---------------- */
+
+const conId = (id, duracion, position = 0, title = 'X', author = 'Y') => ({
+  book_id: id,
+  duration: duracion,
+  position,
+  global_position: position,
+  title,
+  author,
+})
+
+const contexto = { duracion: 47631, titulo: 'X', autor: 'Y' }
+
+test('sin filas remotas el grupo esta vacio', () => {
+  assert.deepEqual(agruparMismoLibro([], { idsPropios: ['mia'], ...contexto }), [])
+})
+
+test('agrupa la fila ajena que es el mismo libro', () => {
+  const grupo = agruparMismoLibro([conId('ajena', 47630)], { idsPropios: ['mia'], ...contexto })
+  assert.deepEqual(grupo.map((f) => f.book_id), ['ajena'])
+})
+
+test('agrupa la propia y la ajena cuando existen las dos', () => {
+  const filas = [conId('mia', 47631), conId('ajena', 47630)]
+  const grupo = agruparMismoLibro(filas, { idsPropios: ['mia'], ...contexto })
+  assert.deepEqual(grupo.map((f) => f.book_id).sort(), ['ajena', 'mia'])
+})
+
+test('no agrupa filas de otra duracion', () => {
+  const filas = [conId('mia', 47631), conId('otroLibro', 12000)]
+  const grupo = agruparMismoLibro(filas, { idsPropios: ['mia'], ...contexto })
+  assert.deepEqual(grupo.map((f) => f.book_id), ['mia'])
+})
+
+test('ante dos ajenas ambiguas no se agrupa ninguna', () => {
+  // Dos libros distintos de duracion parecida y ningun titulo coincide: no
+  // se fusiona nada, que es peor que no sincronizar.
+  const filas = [
+    conId('mia', 47631),
+    conId('ajena1', 47630, 0, 'Elantris', 'S'),
+    conId('ajena2', 47635, 0, 'Trenza', 'S'),
+  ]
+  const grupo = agruparMismoLibro(filas, { idsPropios: ['mia'], duracion: 47631, titulo: 'Otro', autor: 'S' })
+  assert.deepEqual(grupo.map((f) => f.book_id), ['mia'])
+})
+
+test('ante dos ajenas desempata el titulo', () => {
+  const filas = [
+    conId('ajena1', 47630, 0, 'Elantris', 'S'),
+    conId('ajena2', 47635, 0, 'Trenza', 'S'),
+  ]
+  const grupo = agruparMismoLibro(filas, { idsPropios: [], duracion: 47631, titulo: 'TRENZA', autor: 's' })
+  assert.deepEqual(grupo.map((f) => f.book_id), ['ajena2'])
+})
+
+test('la fila canonica es la misma se mire desde donde se mire', () => {
+  const a = conId('aaa', 47631)
+  const b = conId('zzz', 47631)
+  // Los dos dispositivos ven el grupo en distinto orden y deben coincidir.
+  assert.equal(elegirCanonica([a, b]).book_id, 'aaa')
+  assert.equal(elegirCanonica([b, a]).book_id, 'aaa')
+})
+
+test('al fusionar se conserva la posicion mas avanzada', () => {
+  const grupo = [conId('aaa', 47631, 100), conId('zzz', 47631, 25593)]
+  assert.equal(filaMasAvanzada(grupo).position, 25593)
+  // Y no tiene por que ser la canonica: por eso se guardan por separado.
+  assert.equal(elegirCanonica(grupo).book_id, 'aaa')
 })
 
 /* ---------------- Resolución de posiciones ---------------- */
