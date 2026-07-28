@@ -124,19 +124,22 @@ export async function pullProgress(syncId) {
  * los dos escriben en el mismo sitio. Sin esto, cada uno seguiría escribiendo
  * en su propia fila y no volverían a encontrarse nunca.
  *
- * Devuelve `{ syncId, progreso, fusionadas }`. Nunca lanza: quedarse sin
- * sincronizar es aceptable, no poder escuchar no.
+ * Devuelve `{ syncId, progreso, fusionadas, ok }`. `ok` en false significa que
+ * no se ha podido consultar la nube, que NO es lo mismo que no haya fila:
+ * confundirlos lleva a subir a ciegas y borrar el avance del otro dispositivo.
+ *
+ * Nunca lanza: quedarse sin sincronizar es aceptable, no poder escuchar no.
  */
 export async function reconciliarLibro({ fingerprint, syncId, duracion, titulo, autor }) {
   const db = getClient()
-  const porDefecto = { syncId: syncId || fingerprint, progreso: null, fusionadas: 0 }
+  const porDefecto = { syncId: syncId || fingerprint, progreso: null, fusionadas: 0, ok: true }
   if (!db || !fingerprint) return porDefecto
 
   try {
     // Camino rápido: el libro ya sabe dónde vive.
     if (syncId) {
       const fila = await pullProgress(syncId)
-      if (fila) return { syncId, progreso: fila, fusionadas: 0 }
+      if (fila) return { syncId, progreso: fila, fusionadas: 0, ok: true }
     }
 
     if (!duracion) return porDefecto
@@ -176,10 +179,10 @@ export async function reconciliarLibro({ fingerprint, syncId, duracion, titulo, 
 
     const progreso =
       avanzada.book_id === canonica.book_id ? avanzada : { ...avanzada, book_id: canonica.book_id }
-    return { syncId: canonica.book_id, progreso, fusionadas: sobrantes.length }
+    return { syncId: canonica.book_id, progreso, fusionadas: sobrantes.length, ok: true }
   } catch (err) {
     console.warn('No se pudo reconciliar el libro con la nube', err)
-    return porDefecto
+    return { ...porDefecto, ok: false }
   }
 }
 

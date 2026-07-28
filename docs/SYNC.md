@@ -89,12 +89,22 @@ Una fila por cuenta y libro:
 3. **Nunca se pisa una posición más avanzada.** Antes de subir se comprueba la
    última posición remota conocida: si va por delante de la nuestra, no se
    sube. Un dispositivo que se quedó atrás no borra el avance del otro.
-4. **Reiniciar un libro sí se propaga.** Volver casi al principio (menos de
-   30 s, o un libro marcado como terminado) se considera intencionado y se
-   sube aunque haga retroceder la posición.
-5. **Los fallos de red nunca bloquean**: si no hay conexión, se escucha en
+4. **Lo que decide el usuario manda sobre la regla anterior.** Mover la barra,
+   saltar 15 o 30 segundos, ir a un marcador o a un capítulo, o reabrir un
+   libro terminado, marcan la posición como *intencionada*, y esa se sube
+   aunque sea anterior a la de la nube.
+
+   La regla 3 existe para que un dispositivo rezagado no borre el avance del
+   otro **solo por abrir el libro**, no para impedirte decidir dónde quieres
+   estar. Sin esta distinción, retroceder media hora porque te has perdido no
+   sobrevivía: al reabrir, la nube te devolvía al punto adelantado.
+5. **No se sube lo que no se ha podido leer.** Si la consulta a la nube falla,
+   no se sube nada: sin saber por dónde va el otro dispositivo, escribir es
+   una apuesta. «No hay fila» y «no he podido leer» son casos distintos y se
+   tratan como tales.
+6. **Los fallos de red nunca bloquean**: si no hay conexión, se escucha en
    local y se sube más tarde. La sincronización es una mejora, no un requisito.
-6. **`position` manda sobre `global_position`**: para retomar se busca la pista
+7. **`position` manda sobre `global_position`**: para retomar se busca la pista
    por su `track_id` y se salta a `position`. `global_position` es solo
    informativo, porque depende del orden de las pistas.
 

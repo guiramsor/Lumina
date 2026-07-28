@@ -151,9 +151,24 @@ test('no se pisa una posicion remota mas avanzada', () => {
   assert.equal(debeSubir(6000, 5000), true)
 })
 
+test('un retroceso deliberado siempre se propaga', () => {
+  // Vas por 7 h, te pierdes y retrocedes a 6 h 30: esa es tu posicion, aunque
+  // la nube tenga una mas avanzada. Sin esto, reabrir te devolvia a las 7 h.
+  assert.equal(debeSubir(23400, 25593, { intencionado: true }), true)
+  // Y sin intencion, el mismo caso sigue protegido.
+  assert.equal(debeSubir(23400, 25593), false)
+})
+
 test('reiniciar un libro si se propaga', () => {
-  assert.equal(debeSubir(12, 5000), true)
+  assert.equal(debeSubir(12, 5000, { intencionado: true }), true)
   assert.equal(debeSubir(100, 5000, { terminado: true }), true)
+})
+
+test('estar al principio no basta para pisar la nube', () => {
+  // Antes cualquier posicion menor de 30 s se tomaba por un reinicio; abrir un
+  // libro apenas empezado y salir borraba el avance del otro dispositivo.
+  assert.equal(debeSubir(0, 5000), false)
+  assert.equal(debeSubir(12, 5000), false)
 })
 
 test('sin nada remoto conocido siempre se sube', () => {

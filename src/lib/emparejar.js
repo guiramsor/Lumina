@@ -128,13 +128,22 @@ export function ganaLaRemota(posicionLocal, posicionRemota, margen = 5) {
 /**
  * ¿Debe subirse esta posición, sabiendo la última remota conocida?
  *
- * No se pisa una posición más avanzada que la nuestra, salvo que el usuario
- * haya reiniciado el libro a propósito: volver casi al principio o marcarlo
- * como terminado sí son intenciones claras.
+ * La regla protege de un caso concreto: que un dispositivo rezagado borre el
+ * avance del otro solo por abrir el libro. No pretende impedir que decidas
+ * dónde quieres estar.
+ *
+ * Por eso `intencionado` manda sobre todo lo demás. Si has movido la barra,
+ * saltado a un marcador o a un capítulo, esa es tu posición aunque sea
+ * anterior a la de la nube: retroceder media hora porque te has perdido tiene
+ * que persistir, y sin esta distinción la nube te devolvía al punto avanzado
+ * en cuanto reabrías el libro.
  */
-export function debeSubir(posicion, posicionRemotaConocida, { terminado = false } = {}) {
-  if (terminado) return true
+export function debeSubir(
+  posicion,
+  posicionRemotaConocida,
+  { terminado = false, intencionado = false } = {}
+) {
+  if (terminado || intencionado) return true
   if (posicionRemotaConocida == null) return true
-  if (posicion <= 30) return true // reinicio deliberado
   return posicion >= posicionRemotaConocida - 5
 }

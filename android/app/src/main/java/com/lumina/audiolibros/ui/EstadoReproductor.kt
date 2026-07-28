@@ -107,6 +107,12 @@ class EstadoReproductor(
     private var posicionRemotaConocida: Double? = null
     /** Fila de la nube en la que vive el libro abierto. */
     private var syncIdActual: String? = null
+    /**
+     * La posición la ha elegido el usuario (barra o saltos), no la inercia de
+     * la reproducción. Una posición elegida manda sobre la nube aunque sea
+     * anterior: retroceder media hora tiene que persistir.
+     */
+    private var posicionIntencionada = false
 
     /* ---------------- Abrir ---------------- */
 
@@ -116,6 +122,7 @@ class EstadoReproductor(
         aviso = null
         colocado = false
         lecturaRemotaFiable = false
+        posicionIntencionada = false
         alcance.launch {
             val local = AlmacenLocal.progreso(context, elegido.bookId)
             // Averigua en qué fila de la nube vive el libro. La duración y las
@@ -151,8 +158,12 @@ class EstadoReproductor(
                     (remoto.dispositivo?.let { " · $it" } ?: "")
             }
 
-            // Un libro terminado se reabre desde el principio.
-            if (terminado) posicion = 0L
+            // Un libro terminado se reabre desde el principio: es una
+            // decisión, no inercia, así que debe propagarse.
+            if (terminado) {
+                posicion = 0L
+                posicionIntencionada = true
+            }
 
             // Rebobinado inteligente entre sesiones.
             if (posicion > 0 && escuchadoEn > 0) {
@@ -232,6 +243,7 @@ class EstadoReproductor(
         val destino = (c.currentPosition + segundos * 1000).coerceIn(0L, c.duration.coerceAtLeast(0L))
         c.seekTo(destino)
         ultimaPausaEn = null
+        posicionIntencionada = true
         guardar(forzar = true)
     }
 
@@ -239,6 +251,7 @@ class EstadoReproductor(
         val c = controller ?: return
         c.seekTo(ms.coerceIn(0L, c.duration.coerceAtLeast(0L)))
         ultimaPausaEn = null
+        posicionIntencionada = true
         guardar(forzar = true)
     }
 
@@ -310,7 +323,10 @@ class EstadoReproductor(
             return
         }
         // No pisar una posición más avanzada guardada por el otro dispositivo.
-        if (!EmparejarLibros.debeSubir(posicion / 1000.0, posicionRemotaConocida)) {
+        if (!EmparejarLibros.debeSubir(
+                posicion / 1000.0, posicionRemotaConocida, intencionado = posicionIntencionada
+            )
+        ) {
             android.util.Log.i("LuminaSync", "No se sube: la nube va mas avanzada")
             return
         }
@@ -332,7 +348,13 @@ class EstadoReproductor(
                 actual.titulo,
             )
             estadoSync = if (bien) EstadoSync.HECHO else EstadoSync.FALLO
-            if (bien) sincronizadoEn = System.currentTimeMillis()
+            if (bien) {
+                sincronizadoEn = System.currentTimeMillis()
+                // Lo que acabamos de subir pasa a ser la referencia remota; si
+                // no, un retroceso quedaría bloqueado en los guardados
+                // siguientes por su propia posición anterior.
+                posicionRemotaConocida = posicion / 1000.0
+            }
         }
     }
 

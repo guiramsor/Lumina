@@ -153,9 +153,24 @@ class EmparejarLibrosTest {
     }
 
     @Test
+    fun `un retroceso deliberado siempre se propaga`() {
+        // Vas por 7 h, te pierdes y retrocedes a 6 h 30: esa es tu posicion,
+        // aunque la nube tenga una mas avanzada.
+        assertTrue(EmparejarLibros.debeSubir(23400.0, 25593.0, intencionado = true))
+        assertFalse(EmparejarLibros.debeSubir(23400.0, 25593.0))
+    }
+
+    @Test
     fun `reiniciar un libro si se propaga`() {
-        assertTrue(EmparejarLibros.debeSubir(12.0, 5000.0))
+        assertTrue(EmparejarLibros.debeSubir(12.0, 5000.0, intencionado = true))
         assertTrue(EmparejarLibros.debeSubir(100.0, 5000.0, terminado = true))
+    }
+
+    @Test
+    fun `estar al principio no basta para pisar la nube`() {
+        // Antes cualquier posicion menor de 30 s se tomaba por un reinicio.
+        assertFalse(EmparejarLibros.debeSubir(0.0, 5000.0))
+        assertFalse(EmparejarLibros.debeSubir(12.0, 5000.0))
     }
 
     @Test

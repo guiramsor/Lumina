@@ -122,13 +122,21 @@ object EmparejarLibros {
     /**
      * ¿Debe subirse esta posición, sabiendo la última remota conocida?
      *
-     * No se pisa una posición más avanzada, salvo que el usuario haya
-     * reiniciado el libro a propósito.
+     * La regla protege de un caso concreto: que un dispositivo rezagado borre
+     * el avance del otro solo por abrir el libro. No pretende impedir que el
+     * usuario decida dónde quiere estar.
+     *
+     * Por eso `intencionado` manda sobre todo lo demás: si ha movido la barra
+     * o ha saltado, esa es su posición aunque sea anterior a la de la nube.
      */
-    fun debeSubir(posicion: Double, posicionRemotaConocida: Double?, terminado: Boolean = false): Boolean {
-        if (terminado) return true
+    fun debeSubir(
+        posicion: Double,
+        posicionRemotaConocida: Double?,
+        terminado: Boolean = false,
+        intencionado: Boolean = false,
+    ): Boolean {
+        if (terminado || intencionado) return true
         if (posicionRemotaConocida == null) return true
-        if (posicion <= 30) return true // reinicio deliberado
         return posicion >= posicionRemotaConocida - 5
     }
 }

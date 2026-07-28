@@ -103,6 +103,11 @@ export function PlayerProvider({ children }) {
   const lastPushRef = useRef(0) // última subida a la nube
   const remotePosRef = useRef(null) // última posición remota conocida del libro
   const syncIdRef = useRef(null) // fila de la nube en la que vive este libro
+  // Marca que la posición la ha elegido el usuario (barra, saltos, marcadores),
+  // no la inercia de la reproducción. Una posición elegida manda sobre la nube
+  // aunque sea anterior.
+  const intencionRef = useRef(false)
+  const lecturaFiableRef = useRef(true)
   const statsRef = useRef({ pending: 0, lastTick: 0, lastFlush: 0 })
 
   const [book, setBook] = useState(null)
@@ -302,8 +307,16 @@ export function PlayerProvider({ children }) {
       if (!force && updatedAt - lastPushRef.current < 30_000) return
       // Sin sesión no hay nada que subir, y marcarlo como fallo sería mentir.
       if (!haySesion()) return
-      // No pisar una posición más avanzada guardada por el otro dispositivo.
-      if (!debeSubir(globalTime, remotePosRef.current, { terminado: finished })) return
+      // Nunca sobrescribir una posición remota que no se ha llegado a leer:
+      // sin saber por dónde va el otro dispositivo, subir es una apuesta.
+      if (!lecturaFiableRef.current) {
+        setSyncState('fallo')
+        return
+      }
+      // No pisar una posición más avanzada guardada por el otro dispositivo,
+      // salvo que esta la haya elegido el usuario.
+      const intencionado = intencionRef.current
+      if (!debeSubir(globalTime, remotePosRef.current, { terminado: finished, intencionado })) return
       lastPushRef.current = updatedAt
       setSyncState('subiendo')
       pushProgress({
@@ -404,7 +417,8 @@ export function PlayerProvider({ children }) {
       // Averigua en qué fila de la nube vive este libro. Si el archivo de este
       // equipo no es idéntico al del móvil, lo reconoce por duración y adopta
       // su identificador, para que los dos escriban en la misma fila.
-      const { syncId, progreso: remote } = await reconciliarLibro({
+      intencionRef.current = false
+      const { syncId, progreso: remote, ok } = await reconciliarLibro({
         fingerprint: view.fingerprint,
         syncId: identified.syncId,
         duracion: view.totalDuration,
@@ -412,6 +426,7 @@ export function PlayerProvider({ children }) {
         autor: view.author,
       })
       syncIdRef.current = syncId
+      lecturaFiableRef.current = ok
       if (syncId && syncId !== identified.syncId) {
         updateBook(identified.id, { syncId })
         view.syncId = syncId
@@ -450,6 +465,8 @@ export function PlayerProvider({ children }) {
       if (finished) {
         startTrack = 0
         startTime = 0
+        // Volver a empezar un libro terminado es una decisión, no inercia.
+        intencionRef.current = true
       }
 
       // Rebobinado inteligente entre sesiones: retomar un poco antes de donde
@@ -529,6 +546,7 @@ export function PlayerProvider({ children }) {
       if (!view) return
       const clampedG = Math.max(0, Math.min(g, view.totalDuration || 0))
       lastPauseAtRef.current = null // búsqueda explícita: no aplicar rebobinado
+      intencionRef.current = true // la posición pasa a ser decisión del usuario
       let acc = 0
       let target = view.tracks.length - 1
       let local = 0
@@ -560,10 +578,12 @@ export function PlayerProvider({ children }) {
   )
 
   const nextTrack = useCallback(() => {
+    intencionRef.current = true
     goToTrack(playbackRef.current.trackIndex + 1, 0, isPlaying)
   }, [goToTrack, isPlaying])
 
   const prevTrack = useCallback(() => {
+    intencionRef.current = true
     // If more than 3s in, restart current track; else go to previous.
     if (audioRef.current.currentTime > 3) {
       audioRef.current.currentTime = 0
@@ -575,6 +595,7 @@ export function PlayerProvider({ children }) {
 
   const jumpToTrack = useCallback(
     (index) => {
+      intencionRef.current = true
       goToTrack(index, 0, true)
     },
     [goToTrack]
@@ -585,6 +606,7 @@ export function PlayerProvider({ children }) {
       const ch = chapters[index]
       const view = bookViewRef.current
       if (!ch || !view) return
+      intencionRef.current = true
       if (ch.trackIndex === playbackRef.current.trackIndex) {
         lastPauseAtRef.current = null // salto explícito: no aplicar rebobinado
         audioRef.current.currentTime = Math.max(0, ch.start)
