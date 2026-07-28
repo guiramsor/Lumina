@@ -108,6 +108,10 @@ export function PlayerProvider({ children }) {
   // aunque sea anterior.
   const intencionRef = useRef(false)
   const lecturaFiableRef = useRef(true)
+  // Posición global viva. El estado de React solo se refresca cuatro veces por
+  // segundo, así que diez pulsaciones seguidas de −15 s partirían casi todas
+  // de la misma base y el salto no se acumularía.
+  const posicionGlobalRef = useRef(0)
   const statsRef = useRef({ pending: 0, lastTick: 0, lastFlush: 0 })
 
   const [book, setBook] = useState(null)
@@ -216,6 +220,11 @@ export function PlayerProvider({ children }) {
     }
     const onTimeUpdate = () => {
       setCurrentTime(audio.currentTime)
+      const vista = bookViewRef.current
+      if (vista) {
+        posicionGlobalRef.current =
+          trackOffsetsFor(vista, playbackRef.current.trackIndex) + audio.currentTime
+      }
       const now = Date.now()
       if (now - lastSaveRef.current > 4000) {
         lastSaveRef.current = now
@@ -381,6 +390,7 @@ export function PlayerProvider({ children }) {
     autoplayRef.current = autoplay
     // Update synchronously so progress saved right after a seek uses the new track.
     playbackRef.current = { trackIndex: clamped, tracks: view.tracks }
+    posicionGlobalRef.current = trackOffsetsFor(view, clamped) + seekTime
     setTrackIndex(clamped)
     setCurrentTime(seekTime)
     audio.src = view.tracks[clamped].url
@@ -483,6 +493,7 @@ export function PlayerProvider({ children }) {
       speedRef.current = startSpeed
 
       playbackRef.current = { trackIndex: safeTrack, tracks: view.tracks }
+      posicionGlobalRef.current = trackOffsetsFor(view, safeTrack) + startTime
       setTrackIndex(safeTrack)
       setCurrentTime(startTime)
       pendingSeekRef.current = startTime
@@ -547,6 +558,7 @@ export function PlayerProvider({ children }) {
       const clampedG = Math.max(0, Math.min(g, view.totalDuration || 0))
       lastPauseAtRef.current = null // búsqueda explícita: no aplicar rebobinado
       intencionRef.current = true // la posición pasa a ser decisión del usuario
+      posicionGlobalRef.current = clampedG
       let acc = 0
       let target = view.tracks.length - 1
       let local = 0
@@ -572,9 +584,9 @@ export function PlayerProvider({ children }) {
 
   const skip = useCallback(
     (delta) => {
-      seekGlobal(globalTime + delta)
+      seekGlobal(posicionGlobalRef.current + delta)
     },
-    [seekGlobal, globalTime]
+    [seekGlobal]
   )
 
   const nextTrack = useCallback(() => {

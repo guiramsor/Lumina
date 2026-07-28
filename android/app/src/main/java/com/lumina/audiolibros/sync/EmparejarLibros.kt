@@ -111,6 +111,20 @@ object EmparejarLibros {
         grupo.minByOrNull { idDe(it) }
 
     /**
+     * Segundos desde el principio del libro que representa una fila remota.
+     *
+     * `position` es el segundo **dentro de su pista**, no del libro: en un
+     * libro que el ordenador tiene partido en capítulos, la pista 12 puede
+     * empezar en la hora 6 y su `position` valer 40. Tomarlo por absoluto
+     * mandaría la reproducción al minuto 0:40.
+     *
+     * `global_position` sí cuenta desde el principio, así que manda siempre
+     * que exista; `position` solo queda como respaldo para filas antiguas.
+     */
+    fun posicionAbsoluta(global: Double, dentroDeLaPista: Double): Double =
+        if (global > 0) global else dentroDeLaPista
+
+    /**
      * ¿Gana la posición remota?
      *
      * Gana la escucha **más avanzada**, no la más reciente: así ningún

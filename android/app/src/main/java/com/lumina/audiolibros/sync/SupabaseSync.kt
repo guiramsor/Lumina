@@ -207,10 +207,10 @@ object SupabaseSync {
         }.onFailure { android.util.Log.w("LuminaSync", "No se pudo reconciliar el libro", it) }
     }
 
-    private fun posicionDe(fila: JSONObject): Double {
-        val global = fila.optDouble("global_position", 0.0)
-        return if (global > 0) global else fila.optDouble("position", 0.0)
-    }
+    private fun posicionDe(fila: JSONObject): Double = EmparejarLibros.posicionAbsoluta(
+        fila.optDouble("global_position", 0.0),
+        fila.optDouble("position", 0.0),
+    )
 
     private fun leerFila(fila: JSONObject) = Progreso(
         bookId = fila.getString("book_id"),
@@ -258,9 +258,9 @@ object SupabaseSync {
      */
     fun ganaLaRemota(remota: Progreso?, posicionLocalSegundos: Double): Boolean {
         if (remota == null) return false
-        val posRemota = if (remota.posicionGlobalSegundos > 0) {
-            remota.posicionGlobalSegundos
-        } else remota.posicionSegundos
+        val posRemota = EmparejarLibros.posicionAbsoluta(
+            remota.posicionGlobalSegundos, remota.posicionSegundos
+        )
         return EmparejarLibros.ganaLaRemota(posicionLocalSegundos, posRemota)
     }
 

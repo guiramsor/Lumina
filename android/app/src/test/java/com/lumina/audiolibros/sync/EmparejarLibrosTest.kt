@@ -167,6 +167,15 @@ class EmparejarLibrosTest {
     }
 
     @Test
+    fun `la posicion absoluta cuenta desde el principio del libro`() {
+        // El ordenador tiene el libro partido en capitulos: position es el
+        // segundo dentro de uno de ellos, no del libro entero.
+        assertEquals(21600.0, EmparejarLibros.posicionAbsoluta(21600.0, 40.0), 0.001)
+        // Filas antiguas sin global: solo queda position como respaldo.
+        assertEquals(40.0, EmparejarLibros.posicionAbsoluta(0.0, 40.0), 0.001)
+    }
+
+    @Test
     fun `estar al principio no basta para pisar la nube`() {
         // Antes cualquier posicion menor de 30 s se tomaba por un reinicio.
         assertFalse(EmparejarLibros.debeSubir(0.0, 5000.0))

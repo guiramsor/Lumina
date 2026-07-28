@@ -142,7 +142,7 @@ class EstadoReproductor(
             syncIdActual = idNube
             AlmacenLocal.guardarSyncId(context, elegido.bookId, idNube)
             posicionRemotaConocida = remoto?.let {
-                if (it.posicionGlobalSegundos > 0) it.posicionGlobalSegundos else it.posicionSegundos
+                EmparejarLibros.posicionAbsoluta(it.posicionGlobalSegundos, it.posicionSegundos)
             }
 
             var posicion = local?.posicionMs ?: 0L
@@ -151,7 +151,14 @@ class EstadoReproductor(
 
             // Gana la escucha más avanzada, venga de donde venga.
             if (SupabaseSync.ganaLaRemota(remoto, posicion / 1000.0) && remoto != null) {
-                posicion = (remoto.posicionSegundos * 1000).toLong()
+                // Absoluta, no la del interior de la pista: si el ordenador
+                // tiene el libro partido en capítulos, `position` es el segundo
+                // dentro de uno de ellos y saltaríamos a un punto sin relación.
+                val segundos = EmparejarLibros.posicionAbsoluta(
+                    remoto.posicionGlobalSegundos, remoto.posicionSegundos
+                )
+                posicion = (segundos * 1000).toLong()
+                    .coerceIn(0L, if (elegido.duracionMs > 0) elegido.duracionMs else Long.MAX_VALUE)
                 escuchadoEn = remoto.actualizadoEn
                 terminado = remoto.terminado
                 aviso = "Retomado desde ${formatearTiempo(posicion)}" +
