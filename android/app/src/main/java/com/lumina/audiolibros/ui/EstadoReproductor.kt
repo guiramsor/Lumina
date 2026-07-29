@@ -113,6 +113,8 @@ class EstadoReproductor(
      * anterior: retroceder media hora tiene que persistir.
      */
     private var posicionIntencionada = false
+    /** Evita marcar el final varias veces si el reproductor repite el estado. */
+    private var terminadoYa = false
 
     /* ---------------- Abrir ---------------- */
 
@@ -123,6 +125,7 @@ class EstadoReproductor(
         colocado = false
         lecturaRemotaFiable = false
         posicionIntencionada = false
+        terminadoYa = false
         alcance.launch {
             val local = AlmacenLocal.progreso(context, elegido.bookId)
             // Averigua en qué fila de la nube vive el libro. La duración y las
@@ -271,14 +274,23 @@ class EstadoReproductor(
 
     /* ---------------- Temporizador de sueño ---------------- */
 
+    /**
+     * El temporizador guarda el instante en que debe callarse, no cuántos
+     * ticks le quedan: así no se desfasa si el reloj de la interfaz se retrasa,
+     * y lo que se muestra es siempre el tiempo real que queda.
+     */
+    private var finSuenoEn: Long? = null
+
     fun iniciarSueno(minutos: Int) {
         AlmacenLocal.guardarMinutosSueno(context, minutos)
         modoSueno = ModoSueno.MINUTOS
+        finSuenoEn = System.currentTimeMillis() + minutos * 60_000L
         suenoRestanteS = minutos * 60
     }
 
     fun cancelarSueno() {
         modoSueno = ModoSueno.NINGUNO
+        finSuenoEn = null
         suenoRestanteS = 0
         controller?.volume = 1f
     }
@@ -286,15 +298,67 @@ class EstadoReproductor(
     /** Cuenta atrás con desvanecido en los últimos 12 s, como en el escritorio. */
     fun tictacSueno() {
         if (modoSueno != ModoSueno.MINUTOS) return
-        suenoRestanteS -= 1
+        val fin = finSuenoEn ?: return
+        val restante = ((fin - System.currentTimeMillis()) / 1000).toInt()
+        suenoRestanteS = restante.coerceAtLeast(0)
         val c = controller
-        if (suenoRestanteS <= 0) {
+        if (restante <= 0) {
             c?.pause()
             c?.volume = 1f
             modoSueno = ModoSueno.NINGUNO
+            finSuenoEn = null
             return
         }
-        c?.volume = if (suenoRestanteS <= 12) suenoRestanteS / 12f else 1f
+        c?.volume = if (restante <= 12) restante / 12f else 1f
+    }
+
+    /* ---------------- Fin del libro ---------------- */
+
+    /**
+     * El libro ha llegado al final. Se marca como terminado en local y en la
+     * nube: sin esto el móvil seguía subiendo `finished: false` y borraba la
+     * marca que sí escribe el ordenador, y al reabrirlo se quedaba parado en
+     * el último segundo en vez de empezar de nuevo.
+     */
+    fun marcarTerminado() {
+        val c = controller ?: return
+        val actual = libro ?: return
+        if (terminadoYa) return
+        terminadoYa = true
+
+        val duracion = c.duration.coerceAtLeast(0L)
+        val ahora = System.currentTimeMillis()
+        AlmacenLocal.guardarProgreso(
+            context,
+            AlmacenLocal.Progreso(
+                bookId = actual.bookId,
+                posicionMs = duracion,
+                duracionMs = duracion,
+                terminado = true,
+                velocidad = velocidad,
+                actualizadoEn = ahora,
+            )
+        )
+        if (!SupabaseSync.haySesion(context) || !lecturaRemotaFiable) return
+        estadoSync = EstadoSync.SUBIENDO
+        alcance.launch {
+            val bien = SupabaseSync.subir(
+                context,
+                SupabaseSync.Progreso(
+                    bookId = syncIdActual ?: actual.bookId,
+                    trackId = actual.trackId,
+                    posicionSegundos = duracion / 1000.0,
+                    posicionGlobalSegundos = duracion / 1000.0,
+                    duracionSegundos = duracion / 1000.0,
+                    terminado = true,
+                    actualizadoEn = ahora,
+                    dispositivo = null,
+                ),
+                actual.titulo,
+            )
+            estadoSync = if (bien) EstadoSync.HECHO else EstadoSync.FALLO
+            if (bien) sincronizadoEn = System.currentTimeMillis()
+        }
     }
 
     /* ---------------- Guardado ---------------- */
@@ -304,7 +368,7 @@ class EstadoReproductor(
         val actual = libro ?: return
         // Sin haber colocado la posición, lo que hay en el reproductor no
         // representa dónde va la escucha: guardarlo destruiría el avance.
-        if (!colocado) return
+        if (!colocado || terminadoYa) return
         val posicion = c.currentPosition
         if (posicion <= 0) return
         val ahora = System.currentTimeMillis()
@@ -412,6 +476,13 @@ fun recordarEstadoReproductor(alcance: CoroutineScope): EstadoReproductor {
                     estado.anotarPausa()
                     estado.volcarEscucha()
                     estado.guardar(forzar = true)
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    estado.volcarEscucha()
+                    estado.marcarTerminado()
                 }
             }
         }
