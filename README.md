@@ -172,6 +172,7 @@ android/app/src/main/java/com/lumina/audiolibros/
 ├── player/PlaybackService.kt# Servicio de medios en segundo plano
 └── ui/                      # Pantallas, iconos y tema
 
+docs/CONTEXTO.md         # Estado del proyecto y entorno, para retomarlo
 docs/SYNC.md             # Contrato compartido entre ambas apps
 supabase/schema.sql      # Tabla de progreso con RLS
 test/                    # Tests de la huella, en Node y en la JVM
