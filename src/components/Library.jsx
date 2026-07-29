@@ -45,6 +45,7 @@ export default function Library({
   onDelete,
   onImported,
   onUpdated,
+  sinArchivo,
 }) {
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
@@ -216,6 +217,7 @@ export default function Library({
         index={i + offset}
         book={book}
         progress={progressMap[book.id]}
+        faltaElArchivo={sinArchivo?.has(book.id)}
         onOpen={onOpen}
         onDelete={onDelete}
         onEdit={setEditing}

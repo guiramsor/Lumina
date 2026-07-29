@@ -42,7 +42,9 @@ son unos pocos bytes con la posición.
 - **Reproducción en segundo plano** con la pantalla apagada, mediante un
   servicio de medios propio.
 - **Biblioteca leída del teléfono** con MediaStore: concedes el permiso una vez
-  y aparecen todos tus audios, sin buscarlos en el selector de documentos.
+  y aparecen tus audiolibros, sin buscarlos en el selector de documentos. Si
+  tienes una carpeta de audiolibros se muestra solo esa, para que la música no
+  llene la biblioteca; un botón alterna entre ver solo esa carpeta o todo.
 - **Deslizar hacia abajo** para releer la biblioteca.
 
 ## Instalación
@@ -105,7 +107,9 @@ ven al instante, sin recompilar.
 | --- | --- |
 | `npm run electron:dev` | Vite + Electron con HMR (desarrollo diario) |
 | `npm run dev` | Solo Vite, para probar en el navegador |
-| `npm run test` | Tests de la huella de audiolibros |
+| `npm run test` | Tests de la huella y del emparejamiento de libros |
+| `npm run test:protocolo` | Tests del protocolo de audio, dentro de Electron |
+| `npm run test:arranque` | Comprueba que la app empaquetada abre |
 | `npm run electron:build` | Compila y abre Electron sobre el build de producción |
 | `npm run dist` | Genera el ejecutable en `dist-desktop/` |
 
@@ -172,10 +176,10 @@ están**. En el escritorio la biblioteca guarda la ruta del archivo y un
 protocolo propio, `lumina://`, lo sirve con soporte de rangos, que es lo que
 permite saltar a la hora siete de un archivo de 1,7 GB sin leerlo entero.
 
-Si mueves o borras un audio, el libro te avisa al abrirlo. Reimportarlo desde
-su nueva ubicación lo actualiza en su sitio: como los libros se identifican por
-su huella, conservas el progreso y los marcadores en lugar de crear un
-duplicado.
+Si mueves o borras un audio, su libro aparece marcado en la biblioteca y te
+avisa al abrirlo. Reimportarlo desde su nueva ubicación lo actualiza en su
+sitio: como los libros se identifican por su huella, conservas el progreso y
+los marcadores en lugar de crear un duplicado.
 
 ## Limitaciones conocidas
 

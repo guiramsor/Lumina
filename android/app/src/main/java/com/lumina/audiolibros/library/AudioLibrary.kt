@@ -40,8 +40,31 @@ object AudioLibrary {
     /** Descarta tonos, notificaciones y grabaciones cortas. */
     private const val DURACION_MINIMA_MS = 60_000L
 
-    fun listar(context: Context, alProgresar: ((Int, Int) -> Unit)? = null): List<Audiolibro> {
-        val crudos = consultarMediaStore(context)
+    /**
+     * Carpetas que delatan una biblioteca de audiolibros. Si existe alguna, se
+     * muestran solo sus archivos: de lo contrario cualquier canción de más de
+     * un minuto acaba en la biblioteca, y en un teléfono con música eso es la
+     * mayoría de lo que aparece.
+     */
+    private val CARPETA_DE_LIBROS = Regex("audiobook|audiolibro|audio_?libro", RegexOption.IGNORE_CASE)
+
+    fun pareceCarpetaDeLibros(carpeta: String): Boolean = CARPETA_DE_LIBROS.containsMatchIn(carpeta)
+
+    /**
+     * ¿Hay alguna carpeta de audiolibros en este teléfono? Si no la hay, el
+     * filtro se desactiva solo: más vale enseñarlo todo que una lista vacía.
+     */
+    fun hayCarpetaDeLibros(context: Context): Boolean =
+        consultarMediaStore(context).any { pareceCarpetaDeLibros(it.carpeta) }
+
+    fun listar(
+        context: Context,
+        soloCarpetaDeLibros: Boolean = true,
+        alProgresar: ((Int, Int) -> Unit)? = null,
+    ): List<Audiolibro> {
+        val todos = consultarMediaStore(context)
+        val enCarpeta = todos.filter { pareceCarpetaDeLibros(it.carpeta) }
+        val crudos = if (soloCarpetaDeLibros && enCarpeta.isNotEmpty()) enCarpeta else todos
         val cache = context.getSharedPreferences(CACHE, Context.MODE_PRIVATE)
         val resultado = mutableListOf<Audiolibro>()
 

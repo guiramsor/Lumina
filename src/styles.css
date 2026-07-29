@@ -2319,3 +2319,24 @@ img {
   line-height: 1.45;
   color: #ffb0b0;
 }
+
+/* Libro cuyo audio ya no está donde se importó */
+.book-card.sin-archivo .book-card-cover img,
+.book-card.sin-archivo .book-card-placeholder {
+  filter: grayscale(0.85) brightness(0.55);
+}
+.book-card-perdido {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(120, 20, 20, 0.82);
+  border: 1px solid rgba(255, 140, 140, 0.45);
+  color: #ffdada;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  backdrop-filter: blur(6px);
+}

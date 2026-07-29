@@ -37,7 +37,7 @@ function ProgressRing({ pct }) {
   )
 }
 
-export default function BookCard({ book, progress, onOpen, onDelete, onEdit, index }) {
+export default function BookCard({ book, progress, onOpen, onDelete, onEdit, index, faltaElArchivo }) {
   const [coverUrl, setCoverUrl] = useState(null)
   const [confirming, setConfirming] = useState(false)
 
@@ -59,7 +59,7 @@ export default function BookCard({ book, progress, onOpen, onDelete, onEdit, ind
   return (
     <motion.div
       layout
-      className="book-card"
+      className={`book-card ${faltaElArchivo ? 'sin-archivo' : ''}`}
       style={{ '--card-accent': accent }}
       initial={{ opacity: 0, y: 28, scale: 0.94 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -95,6 +95,14 @@ export default function BookCard({ book, progress, onOpen, onDelete, onEdit, ind
         <div className="book-card-play">
           <PlayIcon size={26} />
         </div>
+        {faltaElArchivo && (
+          <div
+            className="book-card-perdido"
+            title="No se encuentra el archivo de audio. ¿Lo has movido o borrado? Vuelve a importarlo desde su nueva ubicación."
+          >
+            Archivo no encontrado
+          </div>
+        )}
         {progress?.finished ? (
           <div className="book-card-done">✓ Terminado</div>
         ) : (

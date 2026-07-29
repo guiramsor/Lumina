@@ -75,15 +75,18 @@ fun LuminaApp(
     var refrescando by remember { mutableStateOf(false) }
     var avanceEscaneo by remember { mutableFloatStateOf(1f) }
     var enSesion by remember { mutableStateOf(SupabaseSync.haySesion(context)) }
+    var soloLibros by remember { mutableStateOf(AlmacenLocal.soloCarpetaDeLibros(context)) }
+    var hayCarpeta by remember { mutableStateOf(false) }
 
     suspend fun cargar() {
         refrescando = true
         avanceEscaneo = 0f
         biblioteca = enFondo {
-            AudioLibrary.listar(context) { hecho, total ->
+            AudioLibrary.listar(context, soloLibros) { hecho, total ->
                 avanceEscaneo = if (total == 0) 1f else hecho.toFloat() / total
             }
         }
+        hayCarpeta = enFondo { AudioLibrary.hayCarpetaDeLibros(context) }
         progresos = AlmacenLocal.progresos(context)
         avanceEscaneo = 1f
         refrescando = false
@@ -160,6 +163,17 @@ fun LuminaApp(
                 )
             }
             Row {
+                // Solo tiene sentido ofrecer el filtro si hay una carpeta que filtrar.
+                if (hayCarpeta) {
+                    BotonIcono(
+                        onClick = {
+                            soloLibros = !soloLibros
+                            AlmacenLocal.guardarSoloCarpetaDeLibros(context, soloLibros)
+                            alcance.launch { cargar() }
+                        },
+                        tinte = if (soloLibros) MaterialTheme.colorScheme.primary else null,
+                    ) { c, g -> iconoLibro(c, g) }
+                }
                 BotonIcono(onClick = { pantalla = Pantalla.ESTADISTICAS }) { c, g -> iconoGrafico(c, g) }
                 BotonIcono(
                     onClick = { pantalla = Pantalla.SESION },

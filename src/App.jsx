@@ -9,6 +9,7 @@ import MiniPlayer from './components/MiniPlayer.jsx'
 import HelpOverlay from './components/HelpOverlay.jsx'
 import { getAllBooks, getAllProgress, deleteBook as dbDeleteBook, getSettings, putSettings } from './lib/db.js'
 import { paletteToVars, DEFAULT_PALETTE, getTheme } from './lib/theme.js'
+import { librosSinArchivo } from './lib/archivos.js'
 
 export default function App() {
   const { loadBook, book: activeBook } = usePlayer()
@@ -19,6 +20,8 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [themeId, setThemeId] = useState('noche')
   const [showHelp, setShowHelp] = useState(false)
+  // Libros cuyo audio ya no está donde se importó.
+  const [sinArchivo, setSinArchivo] = useState(new Set())
 
   useEffect(() => {
     Promise.all([getAllBooks(), getAllProgress(), getSettings()]).then(([b, p, s]) => {
@@ -28,6 +31,19 @@ export default function App() {
       setLoading(false)
     })
   }, [])
+
+  // Se comprueba fuera del primer pintado: la biblioteca debe aparecer al
+  // instante aunque haya que consultar el disco.
+  useEffect(() => {
+    if (!books.length) return
+    let vivo = true
+    librosSinArchivo(books).then((faltan) => {
+      if (vivo) setSinArchivo(faltan)
+    })
+    return () => {
+      vivo = false
+    }
+  }, [books])
 
   // Atajo global de ayuda: ? abre, Esc cierra (funciona también sin libro cargado)
   useEffect(() => {
@@ -111,6 +127,7 @@ export default function App() {
                 onDelete={onDelete}
                 onImported={onImported}
                 onUpdated={onUpdated}
+                sinArchivo={sinArchivo}
               />
             )}
           </div>

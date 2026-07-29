@@ -181,6 +181,17 @@ object AlmacenLocal {
         guardar(context, AJUSTES, objeto(context, AJUSTES).put("minutosSueno", minutos))
     }
 
+    /**
+     * Mostrar solo la carpeta de audiolibros. Activado por defecto: sin filtro,
+     * cualquier canción de más de un minuto entra en la biblioteca.
+     */
+    fun soloCarpetaDeLibros(context: Context): Boolean =
+        objeto(context, AJUSTES).optBoolean("soloCarpetaLibros", true)
+
+    fun guardarSoloCarpetaDeLibros(context: Context, solo: Boolean) {
+        guardar(context, AJUSTES, objeto(context, AJUSTES).put("soloCarpetaLibros", solo))
+    }
+
     fun ordenBiblioteca(context: Context): String =
         objeto(context, AJUSTES).optString("orden", "reciente")
 
