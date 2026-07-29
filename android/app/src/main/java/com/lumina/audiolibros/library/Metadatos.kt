@@ -79,6 +79,35 @@ object Metadatos {
     }
 
     /**
+     * Portada reducida para enviarla dentro de la sesión de medios.
+     *
+     * Va por Binder hasta la notificación y hasta Android Auto, y ahí hay un
+     * límite de transacción de 1 MB: la portada de disco puede pasar de 1024 px
+     * y no cabría. A 320 px se ve bien en la pantalla del coche y ocupa unas
+     * decenas de kilobytes.
+     */
+    fun portadaParaLaSesion(ruta: String?): ByteArray? {
+        if (ruta == null) return null
+        return runCatching {
+            val medidas = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(ruta, medidas)
+            var muestreo = 1
+            while (medidas.outWidth / muestreo > 640) muestreo *= 2
+
+            val original = BitmapFactory.decodeFile(
+                ruta, BitmapFactory.Options().apply { inSampleSize = muestreo }
+            ) ?: return null
+            val lado = 320
+            val escalada = android.graphics.Bitmap.createScaledBitmap(original, lado, lado, true)
+            val salida = java.io.ByteArrayOutputStream()
+            escalada.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, salida)
+            if (escalada !== original) escalada.recycle()
+            original.recycle()
+            salida.toByteArray()
+        }.getOrNull()
+    }
+
+    /**
      * Color dominante de la portada, para teñir la interfaz igual que en el
      * escritorio. Devuelve null si no hay portada o es demasiado apagada.
      */

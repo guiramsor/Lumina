@@ -46,6 +46,14 @@ son unos pocos bytes con la posición.
   tienes una carpeta de audiolibros se muestra solo esa, para que la música no
   llene la biblioteca; un botón alterna entre ver solo esa carpeta o todo.
 - **Deslizar hacia abajo** para releer la biblioteca.
+- **Android Auto**: el coche lista tus audiolibros con su portada, título y
+  autor, y al elegir uno retoma donde lo dejaste, consultando la nube igual que
+  haría la aplicación.
+
+  Lumina se instala fuera de Google Play, y Android Auto solo muestra ese tipo
+  de aplicaciones si se le permite: en la app de Android Auto, entra en
+  *Ajustes*, pulsa diez veces sobre *Versión* para habilitar las opciones de
+  desarrollador y activa **«Fuentes desconocidas»**.
 
 ## Instalación
 

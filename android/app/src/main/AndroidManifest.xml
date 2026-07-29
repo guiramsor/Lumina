@@ -40,12 +40,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Android Auto descubre las aplicaciones de medios por esta declaracion. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
         <service
             android:name=".player.PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
+                <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <!-- El coche sigue hablando el protocolo antiguo de navegacion. -->
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
     </application>

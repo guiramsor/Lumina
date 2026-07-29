@@ -22,8 +22,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.library.Audiolibro
-import com.lumina.audiolibros.player.EXTRA_SYNC_ID
-import com.lumina.audiolibros.player.EXTRA_TRACK_ID
+import com.lumina.audiolibros.player.Catalogo
 import com.lumina.audiolibros.player.PlaybackService
 import com.lumina.audiolibros.sync.EmparejarLibros
 import com.lumina.audiolibros.sync.SupabaseSync
@@ -192,27 +191,9 @@ class EstadoReproductor(
                     "remoto=${remoto?.posicionSegundos?.toLong()}s fiable=$lecturaRemotaFiable -> ${posicion}ms"
             )
 
-            val item = MediaItem.Builder()
-                .setUri(elegido.uri)
-                .setMediaId(elegido.bookId)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(elegido.titulo)
-                        .setArtist(elegido.autor.ifEmpty { "Audiolibro" })
-                        .setIsPlayable(true)
-                        .setIsBrowsable(false)
-                        .setExtras(
-                            Bundle().apply {
-                                putString(EXTRA_TRACK_ID, elegido.trackId)
-                                // El servicio guarda al cerrar la app, cuando
-                                // esta clase ya no existe: necesita saber en
-                                // qué fila escribir.
-                                putString(EXTRA_SYNC_ID, idNube)
-                            }
-                        )
-                        .build()
-                )
-                .build()
+            // El mismo constructor que usa el coche: así la carátula, el título
+            // y el autor se ven igual en la notificación y en Android Auto.
+            val item = Catalogo.itemDe(elegido, idNube)
 
             // La posición se pasa al cargar el medio, no con un seekTo posterior:
             // así no hay ventana en la que el reproductor esté en el segundo 0.

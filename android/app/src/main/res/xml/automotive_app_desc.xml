@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declara Lumina como aplicación de medios para Android Auto. Sin este archivo
+  y su meta-data en el manifiesto, el coche no la ofrece aunque el servicio
+  exponga el catálogo.
+-->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>
