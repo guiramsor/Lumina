@@ -165,6 +165,14 @@ object GuardadoDeProgreso {
 
     fun lecturaRemotaFueFiable(): Boolean = lecturaFiable
 
+    /**
+     * ¿Está la sesión desbloqueada para guardar? Registrar el libro no basta:
+     * hasta que el reproductor no está en su posición, guardar destruiría el
+     * avance. Lo consulta la prueba del catálogo del coche, porque olvidarse de
+     * desbloquearla deja un viaje entero sin guardar y no da ningún error.
+     */
+    fun estaColocado(): Boolean = colocado
+
     /* ---------------- Ciclo de vida de la sesión ---------------- */
 
     /**

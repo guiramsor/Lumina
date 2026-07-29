@@ -75,16 +75,35 @@ object AudioLibrary {
 
             // La cache solo vale si el archivo sigue siendo el mismo byte a byte.
             if (guardado != null && guardado.optLong("tamano") == crudo.tamano) {
+                val trackIdGuardado = guardado.optString("trackId")
+                var portada = guardado.optString("portada").takeIf { it.isNotEmpty() }
+
+                // Las caratulas viven en la cache de la aplicacion, que Android
+                // vacia cuando necesita espacio y que desaparece al reinstalar.
+                // Sin esta comprobacion el libro se quedaba sin portada **para
+                // siempre**: el acierto de cache impedia volver a leerla del
+                // audio, y ni la biblioteca ni la pantalla del coche volvian a
+                // enseñarla mientras el archivo no cambiara de tamaño.
+                if (portada != null && !java.io.File(portada).exists()) {
+                    portada = Metadatos.guardarPortada(
+                        context, trackIdGuardado, Metadatos.leer(context, crudo.uri).portada
+                    )
+                    cache.edit().putString(
+                        clave,
+                        JSONObject(guardado.toString()).put("portada", portada ?: "").toString()
+                    ).apply()
+                }
+
                 resultado += Audiolibro(
                     uri = crudo.uri,
                     bookId = guardado.optString("bookId"),
-                    trackId = guardado.optString("trackId"),
+                    trackId = trackIdGuardado,
                     titulo = guardado.optString("titulo"),
                     autor = guardado.optString("autor"),
                     carpeta = crudo.carpeta,
                     duracionMs = crudo.duracionMs,
                     tamano = crudo.tamano,
-                    portada = guardado.optString("portada").takeIf { it.isNotEmpty() },
+                    portada = portada,
                 )
                 return@forEachIndexed
             }

@@ -52,6 +52,7 @@ object SupabaseSync {
 
     fun cerrarSesion(context: Context) {
         prefs(context).edit().clear().apply()
+        sesionCaducada = false
     }
 
     /* ---------------- Sesión ---------------- */
@@ -86,14 +87,59 @@ object SupabaseSync {
             .apply()
     }
 
-    /** Devuelve un token válido, renovándolo si está a punto de caducar. */
+    /**
+     * La sesión ha caducado de verdad y hay que volver a entrar.
+     *
+     * Se distingue de «no hay sesión» porque el usuario sí entró alguna vez y
+     * merece que se lo digan, en vez de dejarle creyendo que sincroniza.
+     */
+    @Volatile var sesionCaducada: Boolean = false
+        private set
+
+    /**
+     * ¿El servidor ha **rechazado** el refresco, o solo no se ha podido
+     * preguntar?
+     *
+     * La diferencia decide si se conserva la sesión o se tira. Un corte de red
+     * es pasajero y tirar la sesión por él obligaría a escribir la contraseña
+     * cada vez que se pierde cobertura. Un refresco rechazado, en cambio, ya no
+     * se arregla solo: el token viejo seguirá dando «JWT expired» para siempre.
+     */
+    private fun sesionRechazada(error: Throwable): Boolean {
+        if (error is java.io.IOException) return false
+        val m = error.message.orEmpty()
+        return m.contains("invalid_grant", true) ||
+            m.contains("refresh_token", true) ||
+            m.contains("Refresh Token", true) ||
+            m.contains("HTTP 400") ||
+            m.contains("HTTP 401")
+    }
+
+    /**
+     * Devuelve un token válido, renovándolo si está a punto de caducar.
+     *
+     * El refresco va sincronizado porque lo piden a la vez el reloj del
+     * servicio y la pantalla, y los refresh_token de Supabase son de un solo
+     * uso: dos refrescos simultáneos se invalidan entre ellos y tumban una
+     * sesión que estaba sana.
+     */
+    @Synchronized
     private fun token(context: Context): String? {
         val p = prefs(context)
         val acceso = p.getString(CLAVE_ACCESO, null) ?: return null
         val caduca = p.getLong(CLAVE_CADUCA, 0)
-        if (System.currentTimeMillis() < caduca - 60_000) return acceso
+        if (System.currentTimeMillis() < caduca - 60_000) {
+            sesionCaducada = false
+            return acceso
+        }
 
-        val refresco = p.getString(CLAVE_REFRESCO, null) ?: return acceso
+        val refresco = p.getString(CLAVE_REFRESCO, null)?.takeIf { it.isNotEmpty() && it != "null" }
+        if (refresco == null) {
+            // Un token caducado sin con qué renovarlo no vale para nada: lo
+            // único que hace es dar «JWT expired» en cada peticion.
+            marcarCaducada(context)
+            return null
+        }
         return runCatching {
             val respuesta = peticion(
                 metodo = "POST",
@@ -102,12 +148,27 @@ object SupabaseSync {
                 token = anonKey,
             )
             guardarSesion(context, JSONObject(respuesta))
+            sesionCaducada = false
             p.getString(CLAVE_ACCESO, null)
-        }.getOrElse {
-            // Si el refresco falla se sigue con el token viejo: puede que solo
-            // sea un corte de red y escuchar nunca debe depender de esto.
-            acceso
+        }.getOrElse { error ->
+            if (sesionRechazada(error)) {
+                // Insistir con el token viejo dejaba la app «con sesión» pero
+                // incapaz de sincronizar, sin más señal que un aviso genérico
+                // de falta de conexión. Se tira y se pide entrar otra vez.
+                android.util.Log.w("LuminaSync", "Sesion caducada, hay que volver a entrar", error)
+                marcarCaducada(context)
+                null
+            } else {
+                // Solo un corte de red: se sigue con el token viejo, que puede
+                // que aún valga, y escuchar nunca depende de esto.
+                acceso
+            }
         }
+    }
+
+    private fun marcarCaducada(context: Context) {
+        cerrarSesion(context)
+        sesionCaducada = true
     }
 
     /* ---------------- Progreso ---------------- */

@@ -253,6 +253,12 @@ class PlaybackService : MediaLibraryService() {
                 // Si quien llama ya pidió una posición concreta, manda la suya.
                 val desde = if (startPositionMs == C.TIME_UNSET || startPositionMs <= 0) posicion
                 else startPositionMs
+                // El reproductor arranca ya en `desde`, así que a partir de
+                // aquí lo que marque es la escucha real y se puede guardar.
+                // Sin esto, arrancar desde el coche registraba la sesión pero
+                // no la desbloqueaba nunca, y no se guardaba una sola posición
+                // en todo el viaje.
+                GuardadoDeProgreso.colocado()
                 futuro.set(MediaSession.MediaItemsWithStartPosition(listOf(item), 0, desde))
             }
             return futuro

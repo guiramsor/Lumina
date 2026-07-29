@@ -191,8 +191,17 @@ class EstadoReproductor(
             cargando = false
 
             if (!lecturaRemotaFiable) {
-                aviso = "Sin conexión con la nube: se escucha desde la posición del móvil " +
-                    "y no se subirá nada para no pisar la del ordenador."
+                // Distinguir las dos causas importa: una se arregla sola al
+                // recuperar cobertura y la otra no se arregla nunca hasta que
+                // el usuario vuelva a entrar. Decir «sin conexión» en el
+                // segundo caso deja creyendo que sincroniza cuando no lo hace.
+                aviso = if (SupabaseSync.sesionCaducada) {
+                    "La sesión ha caducado: vuelve a iniciarla para sincronizar. " +
+                        "Mientras tanto se escucha desde la posición del móvil y no se sube nada."
+                } else {
+                    "Sin conexión con la nube: se escucha desde la posición del móvil " +
+                        "y no se subirá nada para no pisar la del ordenador."
+                }
             }
             alTerminar()
         }
