@@ -25,6 +25,7 @@ import com.lumina.audiolibros.library.Audiolibro
 import com.lumina.audiolibros.player.Catalogo
 import com.lumina.audiolibros.player.PlaybackService
 import com.lumina.audiolibros.sync.EmparejarLibros
+import com.lumina.audiolibros.sync.GuardadoDeProgreso
 import com.lumina.audiolibros.sync.SupabaseSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,33 +88,6 @@ class EstadoReproductor(
         private set
 
     private var ultimaPausaEn: Long? = null
-    private var ultimaSubida = 0L
-    private var segundosAcumulados = 0.0
-
-    /**
-     * Dos cerrojos que impiden destruir el avance hecho en el otro dispositivo:
-     *
-     * - `colocado`: hasta que el reproductor no está en la posición correcta,
-     *   no se guarda nada. Si no, los primeros segundos desde cero se
-     *   guardarían como si fueran la posición real.
-     * - `lecturaRemotaFiable`: si no se ha podido leer la nube, jamás se sube.
-     *   Sobrescribir lo que no has llegado a leer es la forma más rápida de
-     *   perder siete horas de escucha.
-     */
-    private var colocado = false
-    private var lecturaRemotaFiable = false
-    /** Ultima posicion remota conocida del libro abierto, en segundos. */
-    private var posicionRemotaConocida: Double? = null
-    /** Fila de la nube en la que vive el libro abierto. */
-    private var syncIdActual: String? = null
-    /**
-     * La posición la ha elegido el usuario (barra o saltos), no la inercia de
-     * la reproducción. Una posición elegida manda sobre la nube aunque sea
-     * anterior: retroceder media hora tiene que persistir.
-     */
-    private var posicionIntencionada = false
-    /** Evita marcar el final varias veces si el reproductor repite el estado. */
-    private var terminadoYa = false
 
     /* ---------------- Abrir ---------------- */
 
@@ -121,31 +95,28 @@ class EstadoReproductor(
         val c = controller ?: return
         cargando = true
         aviso = null
-        colocado = false
-        lecturaRemotaFiable = false
-        posicionIntencionada = false
-        terminadoYa = false
         alcance.launch {
             val local = AlmacenLocal.progreso(context, elegido.bookId)
+            val guardado = AlmacenLocal.syncId(context, elegido.bookId)
             // Averigua en qué fila de la nube vive el libro. La duración y las
             // etiquetas lo reconocen aunque el archivo del ordenador no sea
             // idéntico al de este móvil, y entonces se adopta su identificador.
             val lectura = SupabaseSync.reconciliar(
                 context,
                 fingerprint = elegido.bookId,
-                syncId = AlmacenLocal.syncId(context, elegido.bookId),
+                syncId = guardado,
                 duracionSegundos = elegido.duracionMs / 1000.0,
                 titulo = elegido.titulo,
                 autor = elegido.autor,
             )
             val remoto = lectura.getOrNull()?.progreso
-            lecturaRemotaFiable = lectura.isSuccess
-            val idNube = lectura.getOrNull()?.syncId ?: elegido.bookId
-            syncIdActual = idNube
-            AlmacenLocal.guardarSyncId(context, elegido.bookId, idNube)
-            posicionRemotaConocida = remoto?.let {
-                EmparejarLibros.posicionAbsoluta(it.posicionGlobalSegundos, it.posicionSegundos)
-            }
+            val lecturaRemotaFiable = lectura.isSuccess
+            // Si la lectura falló no se sabe nada nuevo: se conserva el
+            // identificador ya adoptado. Guardar aquí la huella lo pisaría y
+            // devolvería el móvil a escribir en su propia fila, deshaciendo la
+            // adopción por un simple corte de red.
+            val idNube = lectura.getOrNull()?.syncId ?: guardado ?: elegido.bookId
+            if (lecturaRemotaFiable) AlmacenLocal.guardarSyncId(context, elegido.bookId, idNube)
 
             var posicion = local?.posicionMs ?: 0L
             var escuchadoEn = local?.actualizadoEn ?: 0L
@@ -167,12 +138,8 @@ class EstadoReproductor(
                     (remoto.dispositivo?.let { " · $it" } ?: "")
             }
 
-            // Un libro terminado se reabre desde el principio: es una
-            // decisión, no inercia, así que debe propagarse.
-            if (terminado) {
-                posicion = 0L
-                posicionIntencionada = true
-            }
+            // Un libro terminado se reabre desde el principio.
+            if (terminado) posicion = 0L
 
             // Rebobinado inteligente entre sesiones.
             if (posicion > 0 && escuchadoEn > 0) {
@@ -184,6 +151,25 @@ class EstadoReproductor(
             libro = elegido
             velocidad = suya
             ultimaPausaEn = null
+
+            // A partir de aquí el guardado es cosa del servicio, que sigue vivo
+            // aunque esta pantalla desaparezca.
+            GuardadoDeProgreso.abrir(
+                bookId = elegido.bookId,
+                syncId = idNube,
+                trackId = elegido.trackId,
+                titulo = elegido.titulo,
+                autor = elegido.autor,
+                duracionMs = elegido.duracionMs,
+                lecturaFiable = lecturaRemotaFiable,
+                posicionRemota = remoto?.let {
+                    EmparejarLibros.posicionAbsoluta(it.posicionGlobalSegundos, it.posicionSegundos)
+                },
+                velocidad = suya,
+            )
+            // Volver a empezar un libro terminado es una decisión, no inercia,
+            // así que debe propagarse aunque la nube vaya más avanzada.
+            if (terminado) GuardadoDeProgreso.marcarIntencionada()
 
             android.util.Log.i(
                 "LuminaSync",
@@ -201,7 +187,7 @@ class EstadoReproductor(
             c.setPlaybackSpeed(suya)
             c.prepare()
             c.play()
-            colocado = true
+            GuardadoDeProgreso.colocado()
             cargando = false
 
             if (!lecturaRemotaFiable) {
@@ -234,23 +220,38 @@ class EstadoReproductor(
         val destino = (c.currentPosition + segundos * 1000).coerceIn(0L, c.duration.coerceAtLeast(0L))
         c.seekTo(destino)
         ultimaPausaEn = null
-        posicionIntencionada = true
-        guardar(forzar = true)
+        GuardadoDeProgreso.marcarIntencionada()
+        guardarAhora()
     }
 
     fun buscar(ms: Long) {
         val c = controller ?: return
         c.seekTo(ms.coerceIn(0L, c.duration.coerceAtLeast(0L)))
         ultimaPausaEn = null
-        posicionIntencionada = true
-        guardar(forzar = true)
+        GuardadoDeProgreso.marcarIntencionada()
+        guardarAhora()
     }
 
     fun cambiarVelocidad(nueva: Float) {
         velocidad = nueva
         controller?.setPlaybackSpeed(nueva)
         AlmacenLocal.guardarVelocidadPorDefecto(context, nueva)
-        guardar(forzar = false)
+        GuardadoDeProgreso.fijarVelocidad(nueva)
+    }
+
+    /**
+     * Guardado inmediato tras una acción del usuario.
+     *
+     * El reloj periódico vive en el servicio, no aquí: una barra movida quiere
+     * quedar escrita ya, sin esperar al siguiente tic.
+     */
+    private fun guardarAhora() {
+        val c = controller ?: return
+        val posicion = c.currentPosition
+        val duracion = c.duration
+        alcance.launch {
+            GuardadoDeProgreso.guardar(context, posicion, duracion, forzar = true)
+        }
     }
 
     /* ---------------- Temporizador de sueño ---------------- */
@@ -293,141 +294,28 @@ class EstadoReproductor(
         c?.volume = if (restante <= 12) restante / 12f else 1f
     }
 
-    /* ---------------- Fin del libro ---------------- */
-
-    /**
-     * El libro ha llegado al final. Se marca como terminado en local y en la
-     * nube: sin esto el móvil seguía subiendo `finished: false` y borraba la
-     * marca que sí escribe el ordenador, y al reabrirlo se quedaba parado en
-     * el último segundo en vez de empezar de nuevo.
-     */
-    fun marcarTerminado() {
-        val c = controller ?: return
-        val actual = libro ?: return
-        if (terminadoYa) return
-        terminadoYa = true
-
-        val duracion = c.duration.coerceAtLeast(0L)
-        val ahora = System.currentTimeMillis()
-        AlmacenLocal.guardarProgreso(
-            context,
-            AlmacenLocal.Progreso(
-                bookId = actual.bookId,
-                posicionMs = duracion,
-                duracionMs = duracion,
-                terminado = true,
-                velocidad = velocidad,
-                actualizadoEn = ahora,
-            )
-        )
-        if (!SupabaseSync.haySesion(context) || !lecturaRemotaFiable) return
-        estadoSync = EstadoSync.SUBIENDO
-        alcance.launch {
-            val bien = SupabaseSync.subir(
-                context,
-                SupabaseSync.Progreso(
-                    bookId = syncIdActual ?: actual.bookId,
-                    trackId = actual.trackId,
-                    posicionSegundos = duracion / 1000.0,
-                    posicionGlobalSegundos = duracion / 1000.0,
-                    duracionSegundos = duracion / 1000.0,
-                    terminado = true,
-                    actualizadoEn = ahora,
-                    dispositivo = null,
-                ),
-                actual.titulo,
-            )
-            estadoSync = if (bien) EstadoSync.HECHO else EstadoSync.FALLO
-            if (bien) sincronizadoEn = System.currentTimeMillis()
-        }
-    }
-
-    /* ---------------- Guardado ---------------- */
-
-    fun guardar(forzar: Boolean) {
-        val c = controller ?: return
-        val actual = libro ?: return
-        // Sin haber colocado la posición, lo que hay en el reproductor no
-        // representa dónde va la escucha: guardarlo destruiría el avance.
-        if (!colocado || terminadoYa) return
-        val posicion = c.currentPosition
-        if (posicion <= 0) return
-        val ahora = System.currentTimeMillis()
-
-        AlmacenLocal.guardarProgreso(
-            context,
-            AlmacenLocal.Progreso(
-                bookId = actual.bookId,
-                posicionMs = posicion,
-                duracionMs = c.duration.coerceAtLeast(0L),
-                terminado = false,
-                velocidad = velocidad,
-                actualizadoEn = ahora,
-            )
-        )
-
-        // La nube se actualiza mucho menos a menudo que el disco local.
-        if (!forzar && ahora - ultimaSubida < 30_000) return
-        if (!SupabaseSync.haySesion(context)) return
-        // Nunca sobrescribir una posición remota que no se ha podido leer.
-        if (!lecturaRemotaFiable) {
-            android.util.Log.w("LuminaSync", "No se sube: la lectura remota fallo al abrir")
-            return
-        }
-        // No pisar una posición más avanzada guardada por el otro dispositivo.
-        if (!EmparejarLibros.debeSubir(
-                posicion / 1000.0, posicionRemotaConocida, intencionado = posicionIntencionada
-            )
-        ) {
-            android.util.Log.i("LuminaSync", "No se sube: la nube va mas avanzada")
-            return
-        }
-        ultimaSubida = ahora
-        estadoSync = EstadoSync.SUBIENDO
-        alcance.launch {
-            val bien = SupabaseSync.subir(
-                context,
-                SupabaseSync.Progreso(
-                    bookId = syncIdActual ?: actual.bookId,
-                    trackId = actual.trackId,
-                    posicionSegundos = posicion / 1000.0,
-                    posicionGlobalSegundos = posicion / 1000.0,
-                    duracionSegundos = (c.duration.coerceAtLeast(0L)) / 1000.0,
-                    terminado = false,
-                    actualizadoEn = ahora,
-                    dispositivo = null,
-                ),
-                actual.titulo,
-            )
-            estadoSync = if (bien) EstadoSync.HECHO else EstadoSync.FALLO
-            if (bien) {
-                sincronizadoEn = System.currentTimeMillis()
-                // Lo que acabamos de subir pasa a ser la referencia remota; si
-                // no, un retroceso quedaría bloqueado en los guardados
-                // siguientes por su propia posición anterior.
-                posicionRemotaConocida = posicion / 1000.0
-            }
-        }
-    }
-
     fun anotarPausa() {
         ultimaPausaEn = System.currentTimeMillis()
     }
 
-    /** Acumula tiempo real de escucha para las estadísticas. */
-    fun sumarEscucha(segundos: Double) {
-        segundosAcumulados += segundos
-        if (segundosAcumulados >= 20) {
-            AlmacenLocal.sumarEscucha(context, segundosAcumulados.toInt())
-            segundosAcumulados = 0.0
+    /**
+     * Copia a estado de Compose lo que el guardián ha hecho por su cuenta, para
+     * que el indicador de la nube siga vivo. La pantalla ya no decide nada
+     * sobre el guardado: solo lo mira.
+     */
+    fun refrescarEstadoSync() {
+        if (GuardadoDeProgreso.subiendo) {
+            estadoSync = EstadoSync.SUBIENDO
+            return
         }
-    }
-
-    fun volcarEscucha() {
-        if (segundosAcumulados >= 1) {
-            AlmacenLocal.sumarEscucha(context, segundosAcumulados.toInt())
-            segundosAcumulados = 0.0
+        estadoSync = when (GuardadoDeProgreso.ultimoResultado) {
+            GuardadoDeProgreso.Resultado.SUBIDO -> EstadoSync.HECHO
+            GuardadoDeProgreso.Resultado.FALLO_AL_SUBIR -> EstadoSync.FALLO
+            GuardadoDeProgreso.Resultado.SOLO_LOCAL ->
+                if (GuardadoDeProgreso.lecturaRemotaFueFiable()) estadoSync else EstadoSync.FALLO
+            GuardadoDeProgreso.Resultado.SIN_SESION -> EstadoSync.INACTIVO
         }
+        sincronizadoEn = GuardadoDeProgreso.sincronizadoEn
     }
 }
 
@@ -442,7 +330,6 @@ fun recordarEstadoReproductor(alcance: CoroutineScope): EstadoReproductor {
         val futuro = MediaController.Builder(context, token).buildAsync()
         futuro.addListener({ estado.controller = futuro.get() }, ContextCompat.getMainExecutor(context))
         onDispose {
-            estado.volcarEscucha()
             estado.controller = null
             MediaController.releaseFuture(futuro)
         }
@@ -453,18 +340,9 @@ fun recordarEstadoReproductor(alcance: CoroutineScope): EstadoReproductor {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 estado.sonando = isPlaying
-                if (!isPlaying) {
-                    estado.anotarPausa()
-                    estado.volcarEscucha()
-                    estado.guardar(forzar = true)
-                }
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
-                    estado.volcarEscucha()
-                    estado.marcarTerminado()
-                }
+                // Guardar al pausar es cosa del servicio, que también recibe
+                // este mismo aviso. Aquí solo se anota para el rebobinado.
+                if (!isPlaying) estado.anotarPausa()
             }
         }
         c?.addListener(listener)
@@ -472,24 +350,27 @@ fun recordarEstadoReproductor(alcance: CoroutineScope): EstadoReproductor {
         onDispose { c?.removeListener(listener) }
     }
 
-    // Reloj: posición, estadísticas, guardado periódico y temporizador.
+    /*
+     * Reloj de la interfaz: solo pinta.
+     *
+     * El guardado de la posición y las estadísticas viven en PlaybackService,
+     * no aquí. Este `LaunchedEffect` muere en cuanto la pantalla sale de
+     * composición —al pulsar atrás, al reclamar memoria el sistema, o si la
+     * reproducción arrancó desde Android Auto y la interfaz no llegó a
+     * existir— mientras el servicio sigue sonando tan tranquilo. Con el
+     * guardado colgando de aquí, una hora de escucha en el coche no dejaba
+     * rastro: ni posición, ni nube, ni estadísticas.
+     */
     LaunchedEffect(estado.controller) {
-        var ultimoTic = System.currentTimeMillis()
         var segundoSueno = System.currentTimeMillis()
         while (true) {
             delay(500)
             val c = estado.controller ?: continue
             estado.posicionMs = c.currentPosition
             estado.duracionMs = c.duration.coerceAtLeast(0L)
+            estado.refrescarEstadoSync()
 
             val ahora = System.currentTimeMillis()
-            if (estado.sonando) {
-                val delta = (ahora - ultimoTic) / 1000.0
-                if (delta in 0.0..2.0) estado.sumarEscucha(delta)
-                estado.guardar(forzar = false)
-            }
-            ultimoTic = ahora
-
             if (estado.modoSueno == ModoSueno.MINUTOS && estado.sonando && ahora - segundoSueno >= 1000) {
                 segundoSueno = ahora
                 estado.tictacSueno()

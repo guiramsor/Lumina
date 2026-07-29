@@ -14,6 +14,7 @@ import {
   elegirCanonica,
   filaMasAvanzada,
   ganaLaRemota,
+  posicionAbsoluta,
   toleranciaDuracion,
 } from './emparejar.js'
 
@@ -101,18 +102,30 @@ function traducirError(mensaje) {
 const COLUMNAS =
   'book_id, track_id, position, global_position, duration, finished, updated_at, device, title, author'
 
-/** Lectura directa de la fila de un libro por su identificador de sincronización. */
-export async function pullProgress(syncId) {
-  const db = getClient()
-  if (!db || !syncId) return null
+/**
+ * Lectura de la fila de un libro por su identificador de sincronización.
+ *
+ * Devuelve `{ fila, ok }`. Separar las dos cosas no es un lujo: «no hay fila»
+ * y «no he podido leer» llevan a decisiones opuestas. Confundirlos hace que un
+ * corte de red se interprete como libro nuevo, y entonces se sube a ciegas por
+ * encima del avance del otro dispositivo. Es la regla 3 de docs/SYNC.md.
+ */
+async function leerFilaPorId(db, syncId) {
+  if (!db || !syncId) return { fila: null, ok: true }
   try {
     const { data, error } = await db.from('progress').select(COLUMNAS).eq('book_id', syncId).maybeSingle()
     if (error) throw error
-    return data || null
+    return { fila: data || null, ok: true }
   } catch (err) {
     console.warn('No se pudo leer el progreso remoto', err)
-    return null
+    return { fila: null, ok: false }
   }
+}
+
+/** Lectura directa de la fila de un libro por su identificador de sincronización. */
+export async function pullProgress(syncId) {
+  const { fila } = await leerFilaPorId(getClient(), syncId)
+  return fila
 }
 
 /**
@@ -130,19 +143,26 @@ export async function pullProgress(syncId) {
  *
  * Nunca lanza: quedarse sin sincronizar es aceptable, no poder escuchar no.
  */
-export async function reconciliarLibro({ fingerprint, syncId, duracion, titulo, autor }) {
-  const db = getClient()
+export async function reconciliarLibro({ fingerprint, syncId, duracion, titulo, autor }, db = getClient()) {
   const porDefecto = { syncId: syncId || fingerprint, progreso: null, fusionadas: 0, ok: true }
   if (!db || !fingerprint) return porDefecto
+
+  // Se arrastra si alguna lectura ha fallado por el camino. Salir con `ok` en
+  // true después de una lectura fallida es peor que salir con false: hace creer
+  // al reproductor que la nube está vacía y le da permiso para subir encima.
+  let fiable = true
 
   try {
     // Camino rápido: el libro ya sabe dónde vive.
     if (syncId) {
-      const fila = await pullProgress(syncId)
+      const { fila, ok } = await leerFilaPorId(db, syncId)
+      if (!ok) fiable = false
       if (fila) return { syncId, progreso: fila, fusionadas: 0, ok: true }
     }
 
-    if (!duracion) return porDefecto
+    // Sin duración no hay segunda vía: la búsqueda por parecido necesita
+    // justamente eso. Si además la lectura por id falló, no sabemos nada.
+    if (!duracion) return { ...porDefecto, ok: fiable }
 
     const margen = toleranciaDuracion(duracion)
     const { data, error } = await db
@@ -154,7 +174,10 @@ export async function reconciliarLibro({ fingerprint, syncId, duracion, titulo, 
 
     const idsPropios = [fingerprint, syncId].filter(Boolean)
     const grupo = agruparMismoLibro(data || [], { idsPropios, duracion, titulo, autor })
-    if (!grupo.length) return porDefecto
+    // No haber encontrado grupo solo significa «este libro no está en la nube»
+    // si todo lo que había que leer se ha leído. Una fila con `duration` nula,
+    // por ejemplo, no la devuelve esta consulta y solo la ve el camino por id.
+    if (!grupo.length) return { ...porDefecto, ok: fiable }
 
     const canonica = elegirCanonica(grupo)
     const avanzada = filaMasAvanzada(grupo)
@@ -229,7 +252,7 @@ export function resolveProgress(local, remote) {
   if (!remote) return { winner: 'local', progress: local }
   if (!local) return { winner: 'remote', progress: remote }
   const posLocal = local.globalTime ?? local.time ?? 0
-  const posRemota = remote.global_position ?? remote.position ?? 0
+  const posRemota = posicionAbsoluta(remote.global_position, remote.position)
   if (ganaLaRemota(posLocal, posRemota)) return { winner: 'remote', progress: remote }
   return { winner: 'local', progress: local }
 }

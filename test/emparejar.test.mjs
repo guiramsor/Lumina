@@ -7,6 +7,7 @@ import {
   agruparMismoLibro,
   elegirCanonica,
   filaMasAvanzada,
+  posicionAbsoluta,
   ganaLaRemota,
   debeSubir,
 } from '../src/lib/emparejar.js'
@@ -131,6 +132,32 @@ test('al fusionar se conserva la posicion mas avanzada', () => {
   assert.equal(filaMasAvanzada(grupo).position, 25593)
   // Y no tiene por que ser la canonica: por eso se guardan por separado.
   assert.equal(elegirCanonica(grupo).book_id, 'aaa')
+})
+
+/* ---------------- Posición absoluta (misma spec que Kotlin) ---------------- */
+
+test('la posicion absoluta cuenta desde el principio del libro', () => {
+  // Mismos vectores que EmparejarLibrosTest.kt: las dos implementaciones
+  // tienen que leer identico el mismo dato.
+  assert.equal(posicionAbsoluta(21600, 40), 21600)
+  // Filas antiguas sin global: solo queda position como respaldo.
+  assert.equal(posicionAbsoluta(0, 40), 40)
+  assert.equal(posicionAbsoluta(0, 0), 0)
+  // La columna es `not null default 0`, pero una fila leida a medias podria
+  // traer null y no debe convertirse en NaN.
+  assert.equal(posicionAbsoluta(null, 40), 40)
+  assert.equal(posicionAbsoluta(undefined, undefined), 0)
+})
+
+test('una fila sin global no se toma por el principio del libro al fusionar', () => {
+  // La divergencia que habia con el movil: {global:0, position:400} valia 0
+  // aqui y 400 alli, asi que cada dispositivo conservaba una fila distinta al
+  // fusionar y la sincronizacion se partia en dos.
+  const grupo = [
+    { book_id: 'aaa', duration: 47631, global_position: 0, position: 400 },
+    { book_id: 'zzz', duration: 47631, global_position: 10, position: 0 },
+  ]
+  assert.equal(filaMasAvanzada(grupo).book_id, 'aaa')
 })
 
 /* ---------------- Resolución de posiciones ---------------- */

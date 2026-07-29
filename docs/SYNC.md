@@ -76,6 +76,7 @@ Una fila por cuenta y libro:
 | `global_position` | Segundos desde el inicio del libro (para el porcentaje) |
 | `duration` | Duración total del libro |
 | `finished` | Si se terminó |
+| `title`, `author` | Etiquetas del libro; **obligatorias**, ver regla 8 |
 | `updated_at` | Momento **real de la escucha**, no el de la subida |
 
 ## Reglas de sincronización
@@ -107,6 +108,37 @@ Una fila por cuenta y libro:
 7. **`position` manda sobre `global_position`**: para retomar se busca la pista
    por su `track_id` y se salta a `position`. `global_position` es solo
    informativo, porque depende del orden de las pistas.
+8. **Nunca se escribe una fila sin `duration`, ni sin `title` y `author`.** No
+   son adornos para depurar: la búsqueda por parecido filtra por rango de
+   duración, así que una fila con `duration` nula **no la encuentra nadie** y
+   deja el libro partido en dos para siempre; y `title`+`author` forman la
+   clave con la que se desempata cuando dos libros duran casi lo mismo, de
+   modo que si un dispositivo no manda el autor, su clave (`titulo|`) no
+   coincide nunca con la del otro y el desempate deja de desempatar.
+9. **El guardado pasa por un solo sitio.** En cada plataforma hay una única
+   puerta que aplica estas reglas —`GuardadoDeProgreso` en Android,
+   `persistProgress` en el escritorio— y ninguna otra ruta escribe en la nube.
+   Ni el cierre de la app, ni el fin del libro, ni el arranque desde Android
+   Auto. Una segunda puerta es una puerta que alguien se olvidará de cerrar.
+
+### Cómo se lee la posición de una fila
+
+Las dos plataformas deben leer idéntico el mismo dato:
+
+```
+posicion_absoluta = global_position > 0 ? global_position : position
+```
+
+`position` es el segundo **dentro de su pista**. En un libro que el ordenador
+tiene partido en capítulos, la pista 12 puede empezar en la hora 6 y su
+`position` valer 40; tomarlo por absoluto mandaría la reproducción al minuto
+0:40. Ojo con escribirlo como `global_position ?? position`: la columna es
+`not null default 0`, así que una fila antigua no trae `null` sino un cero, y
+esa versión se quedaba en el cero mientras la otra plataforma leía los 40 s.
+
+Está en `posicionAbsoluta` de `src/lib/emparejar.js` y en
+`EmparejarLibros.posicionAbsoluta` de Kotlin, con los mismos vectores fijados
+en los tests de ambas.
 
 ## Dos identidades distintas: la huella y el `syncId`
 

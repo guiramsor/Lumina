@@ -11,7 +11,7 @@ import {
 } from '../lib/db.js'
 import { ensureFingerprints, trackIndexByFingerprint } from '../lib/bookIdentity.js'
 import { reconciliarLibro, pushProgress, resolveProgress, haySesion } from '../lib/sync.js'
-import { debeSubir } from '../lib/emparejar.js'
+import { debeSubir, posicionAbsoluta } from '../lib/emparejar.js'
 
 /**
  * Smart rewind (estilo Audible): cuanto más tiempo lleves sin escuchar, más
@@ -441,7 +441,9 @@ export function PlayerProvider({ children }) {
         updateBook(identified.id, { syncId })
         view.syncId = syncId
       }
-      remotePosRef.current = remote ? remote.global_position ?? remote.position ?? 0 : null
+      remotePosRef.current = remote
+        ? posicionAbsoluta(remote.global_position, remote.position)
+        : null
       const { winner } = resolveProgress(local, remote)
 
       let startTrack = 0
@@ -459,7 +461,10 @@ export function PlayerProvider({ children }) {
           startTrack = idx
           startTime = remote.position || 0
         } else {
-          const loc = locateGlobal(view.tracks, remote.global_position || 0)
+          const loc = locateGlobal(
+            view.tracks,
+            posicionAbsoluta(remote.global_position, remote.position)
+          )
           startTrack = loc.index
           startTime = loc.local
         }

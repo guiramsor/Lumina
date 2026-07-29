@@ -5,6 +5,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
@@ -14,11 +15,14 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
-import com.lumina.audiolibros.sync.SupabaseSync
+import com.lumina.audiolibros.sync.GuardadoDeProgreso
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -46,6 +50,7 @@ class PlaybackService : MediaLibraryService() {
 
     private var session: MediaLibrarySession? = null
     private val alcance = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var reloj: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -65,7 +70,77 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
+        // El guardado de la posición cuelga del servicio, no de la pantalla.
+        // La pantalla se destruye al pulsar atrás o cuando el sistema reclama
+        // memoria, y desde Android Auto ni siquiera llega a existir; el
+        // servicio, en cambio, vive exactamente lo que dura la reproducción,
+        // que es justo lo que hay que registrar.
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) arrancarReloj() else {
+                    pararReloj()
+                    guardarLoQueSuena(forzar = true)
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    pararReloj()
+                    val duracion = player.duration
+                    alcance.launch {
+                        GuardadoDeProgreso.volcarEscucha(this@PlaybackService)
+                        GuardadoDeProgreso.marcarTerminado(this@PlaybackService, duracion, duracion)
+                    }
+                }
+            }
+        })
+
         session = MediaLibrarySession.Builder(this, player, CallbackDelCoche()).build()
+    }
+
+    /* ---------------- Reloj de guardado ---------------- */
+
+    /**
+     * Un tic por segundo mientras suena: acumula la escucha real y ofrece la
+     * posición al guardián, que decide si toca escribirla y si toca subirla.
+     */
+    private fun arrancarReloj() {
+        if (reloj?.isActive == true) return
+        reloj = alcance.launch {
+            var ultimoTic = System.currentTimeMillis()
+            while (isActive) {
+                delay(1_000)
+                val ahora = System.currentTimeMillis()
+                val delta = (ahora - ultimoTic) / 1000.0
+                ultimoTic = ahora
+                // Un salto grande significa que el proceso estuvo dormido: no
+                // cuenta como escucha.
+                if (delta in 0.0..2.0) {
+                    GuardadoDeProgreso.sumarEscucha(this@PlaybackService, delta)
+                }
+                val (posicion, duracion) = posicionYDuracion()
+                GuardadoDeProgreso.guardar(this@PlaybackService, posicion, duracion, forzar = false)
+            }
+        }
+    }
+
+    private fun pararReloj() {
+        reloj?.cancel()
+        reloj = null
+    }
+
+    /** ExoPlayer solo se deja consultar desde el hilo principal. */
+    private suspend fun posicionYDuracion(): Pair<Long, Long> = withContext(Dispatchers.Main) {
+        val p = session?.player
+        (p?.currentPosition ?: -1L) to (p?.duration ?: 0L)
+    }
+
+    private fun guardarLoQueSuena(forzar: Boolean) {
+        alcance.launch {
+            GuardadoDeProgreso.volcarEscucha(this@PlaybackService)
+            val (posicion, duracion) = posicionYDuracion()
+            GuardadoDeProgreso.guardar(this@PlaybackService, posicion, duracion, forzar)
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -203,18 +278,16 @@ class PlaybackService : MediaLibraryService() {
             return
         }
 
-        val item = player.currentMediaItem
-        // La fila compartida manda sobre la huella de este archivo.
-        val bookId = item?.mediaMetadata?.extras?.getString(EXTRA_SYNC_ID)
-            ?: item?.mediaId?.takeIf { it.isNotEmpty() }
-        val trackId = item?.mediaMetadata?.extras?.getString(EXTRA_TRACK_ID)
-        val titulo = item?.mediaMetadata?.title?.toString()
         val posicionMs = player.currentPosition
         val duracionMs = player.duration
-
+        pararReloj()
         player.pause()
 
-        if (bookId == null || posicionMs <= 0) {
+        if (GuardadoDeProgreso.libroEnCurso() == null) {
+            // Sin sesión registrada no se sabe si la nube se llegó a leer ni
+            // por dónde iba el otro dispositivo. Subir aquí a ciegas era el
+            // agujero por el que se colaba la posición del móvil por encima de
+            // las horas del ordenador. Callarse es la única respuesta segura.
             detener()
             return
         }
@@ -223,20 +296,8 @@ class PlaybackService : MediaLibraryService() {
             // Si la red no responde, no se retiene el proceso indefinidamente:
             // vale más cerrar limpio que quedarse colgado.
             withTimeoutOrNull(8_000) {
-                SupabaseSync.subir(
-                    this@PlaybackService,
-                    SupabaseSync.Progreso(
-                        bookId = bookId,
-                        trackId = trackId,
-                        posicionSegundos = posicionMs / 1000.0,
-                        posicionGlobalSegundos = posicionMs / 1000.0,
-                        duracionSegundos = if (duracionMs > 0) duracionMs / 1000.0 else null,
-                        terminado = false,
-                        actualizadoEn = System.currentTimeMillis(),
-                        dispositivo = null,
-                    ),
-                    titulo,
-                )
+                GuardadoDeProgreso.volcarEscucha(this@PlaybackService)
+                GuardadoDeProgreso.guardar(this@PlaybackService, posicionMs, duracionMs, forzar = true)
             }
             // ExoPlayer solo admite llamadas desde el hilo principal: pararlo
             // desde el hilo de red lanzaría una excepción.

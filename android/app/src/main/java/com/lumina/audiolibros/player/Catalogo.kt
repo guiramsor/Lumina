@@ -8,6 +8,8 @@ import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.library.AudioLibrary
 import com.lumina.audiolibros.library.Audiolibro
 import com.lumina.audiolibros.library.Metadatos
+import com.lumina.audiolibros.sync.EmparejarLibros
+import com.lumina.audiolibros.sync.GuardadoDeProgreso
 import com.lumina.audiolibros.sync.SupabaseSync
 
 /** Identificador de la carpeta raíz que ve el coche al abrir Lumina. */
@@ -95,28 +97,54 @@ object Catalogo {
      */
     suspend fun prepararParaSonar(context: Context, libro: Audiolibro): Pair<MediaItem, Long> {
         val local = AlmacenLocal.progreso(context, libro.bookId)
+        val guardado = AlmacenLocal.syncId(context, libro.bookId)
         val lectura = SupabaseSync.reconciliar(
             context,
             fingerprint = libro.bookId,
-            syncId = AlmacenLocal.syncId(context, libro.bookId),
+            syncId = guardado,
             duracionSegundos = libro.duracionMs / 1000.0,
             titulo = libro.titulo,
             autor = libro.autor,
         )
-        val syncId = lectura.getOrNull()?.syncId ?: libro.bookId
-        AlmacenLocal.guardarSyncId(context, libro.bookId, syncId)
+        val fiable = lectura.isSuccess
+        // Si la lectura falló no se sabe nada nuevo, así que se conserva el
+        // identificador que ya se había adoptado. Guardar aquí la huella
+        // pisaría la fila compartida y devolvería al móvil a escribir en la
+        // suya, deshaciendo la adopción por un simple corte de red.
+        val syncId = lectura.getOrNull()?.syncId ?: guardado ?: libro.bookId
+        if (fiable) AlmacenLocal.guardarSyncId(context, libro.bookId, syncId)
 
         val remoto = lectura.getOrNull()?.progreso
         var posicion = local?.posicionMs ?: 0L
         if (SupabaseSync.ganaLaRemota(remoto, posicion / 1000.0) && remoto != null) {
             posicion = (
-                com.lumina.audiolibros.sync.EmparejarLibros.posicionAbsoluta(
+                EmparejarLibros.posicionAbsoluta(
                     remoto.posicionGlobalSegundos, remoto.posicionSegundos
                 ) * 1000
                 ).toLong()
         }
+        val terminado = local?.terminado == true || remoto?.terminado == true
         // Un libro terminado se reabre desde el principio.
-        if (local?.terminado == true || remoto?.terminado == true) posicion = 0L
+        if (terminado) posicion = 0L
+
+        // Arrancar desde el coche tiene que dejar registrada la sesión igual
+        // que abrirlo desde la pantalla: es lo que permite que el servicio
+        // guarde la posición mientras se conduce, sin interfaz ninguna.
+        GuardadoDeProgreso.abrir(
+            bookId = libro.bookId,
+            syncId = syncId,
+            trackId = libro.trackId,
+            titulo = libro.titulo,
+            autor = libro.autor,
+            duracionMs = libro.duracionMs,
+            lecturaFiable = fiable,
+            posicionRemota = remoto?.let {
+                EmparejarLibros.posicionAbsoluta(it.posicionGlobalSegundos, it.posicionSegundos)
+            },
+            velocidad = local?.velocidad ?: AlmacenLocal.velocidadPorDefecto(context),
+        )
+        // Volver a empezar un libro terminado es una decisión, no inercia.
+        if (terminado) GuardadoDeProgreso.marcarIntencionada()
 
         val tope = if (libro.duracionMs > 0) libro.duracionMs else Long.MAX_VALUE
         return itemDe(libro, syncId) to posicion.coerceIn(0L, tope)

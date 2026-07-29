@@ -175,8 +175,8 @@ object SupabaseSync {
                 autor = autor,
                 idDe = { it.getString("book_id") },
                 duracionDe = { it.optDouble("duration").takeIf { d -> !d.isNaN() } },
-                tituloDe = { it.optString("title") },
-                autorDe = { it.optString("author") },
+                tituloDe = { textoDe(it, "title") },
+                autorDe = { textoDe(it, "author") },
             )
             if (grupo.isEmpty()) return@runCatching porDefecto
 
@@ -212,19 +212,44 @@ object SupabaseSync {
         fila.optDouble("position", 0.0),
     )
 
+    /**
+     * Texto de una columna que puede venir nula.
+     *
+     * `optString` del org.json de Android devuelve la cadena literal `"null"`
+     * cuando el valor es un null de JSON, no la cadena vacía. Colarlo en la
+     * clave de desempate haría que dos libros sin título se consideraran el
+     * mismo.
+     */
+    internal fun textoDe(fila: JSONObject, columna: String): String? =
+        fila.optString(columna).takeIf { it.isNotEmpty() && it != "null" }
+
     private fun leerFila(fila: JSONObject) = Progreso(
         bookId = fila.getString("book_id"),
-        trackId = fila.optString("track_id").takeIf { it.isNotEmpty() && it != "null" },
+        trackId = textoDe(fila, "track_id"),
         posicionSegundos = fila.optDouble("position", 0.0),
         posicionGlobalSegundos = fila.optDouble("global_position", 0.0),
         duracionSegundos = fila.optDouble("duration").takeIf { !it.isNaN() },
         terminado = fila.optBoolean("finished", false),
         actualizadoEn = instanteDe(fila.optString("updated_at")),
-        dispositivo = fila.optString("device").takeIf { it.isNotEmpty() },
+        dispositivo = textoDe(fila, "device"),
     )
 
-    /** Sube la posición actual. Nunca lanza: un fallo de red no debe molestar. */
-    suspend fun subir(context: Context, progreso: Progreso, titulo: String?): Boolean =
+    /**
+     * Sube la posición actual. Nunca lanza: un fallo de red no debe molestar.
+     *
+     * El `autor` no es decorativo aunque solo se use para depurar a simple
+     * vista: junto al título forma la clave con la que se desempata cuando dos
+     * libros tienen duraciones parecidas. Sin él, las filas escritas por el
+     * móvil daban la clave `titulo|` y nunca coincidían con las del ordenador,
+     * así que el desempate no desempataba nunca y el libro se quedaba sin
+     * sincronizar, en silencio y sin error.
+     */
+    suspend fun subir(
+        context: Context,
+        progreso: Progreso,
+        titulo: String?,
+        autor: String? = null,
+    ): Boolean =
         withContext(Dispatchers.IO) {
             if (!configurado()) return@withContext false
             val acceso = token(context) ?: return@withContext false
@@ -237,6 +262,7 @@ object SupabaseSync {
                     .put("duration", progreso.duracionSegundos ?: JSONObject.NULL)
                     .put("finished", progreso.terminado)
                     .put("title", titulo ?: JSONObject.NULL)
+                    .put("author", autor?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
                     .put("device", "Móvil (Android)")
                     .put("updated_at", iso8601(progreso.actualizadoEn))
                 peticion(

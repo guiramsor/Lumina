@@ -106,11 +106,33 @@ export function elegirCanonica(grupo) {
   return grupo.reduce((a, b) => (a.book_id <= b.book_id ? a : b))
 }
 
+/**
+ * Segundos desde el principio del libro que representa una fila remota.
+ *
+ * `position` es el segundo **dentro de su pista**, no del libro: en un libro
+ * que el ordenador tiene partido en capítulos, la pista 12 puede empezar en la
+ * hora 6 y su `position` valer 40. Tomarlo por absoluto mandaría la
+ * reproducción al minuto 0:40.
+ *
+ * `global_position` sí cuenta desde el principio, así que manda siempre que
+ * exista; `position` solo queda como respaldo para filas antiguas.
+ *
+ * Ojo con `??`: la columna es `not null default 0`, así que una fila antigua no
+ * trae `null` sino un cero, y `global ?? position` se quedaba en ese cero
+ * mientras el móvil leía los 40 s. Dos lecturas distintas del mismo dato es
+ * justo lo que este contrato no puede permitirse.
+ */
+export function posicionAbsoluta(global, dentroDeLaPista) {
+  return (global || 0) > 0 ? global : dentroDeLaPista || 0
+}
+
 /** Posición más avanzada del grupo, para no perder nada al fusionar. */
 export function filaMasAvanzada(grupo) {
   if (!grupo?.length) return null
   return grupo.reduce((a, b) =>
-    (b.global_position ?? b.position ?? 0) > (a.global_position ?? a.position ?? 0) ? b : a
+    posicionAbsoluta(b.global_position, b.position) > posicionAbsoluta(a.global_position, a.position)
+      ? b
+      : a
   )
 }
 
