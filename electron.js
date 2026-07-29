@@ -96,26 +96,45 @@ function createWindow() {
   });
 }
 
-// Inicializar la aplicación cuando esté lista
-app.whenReady().then(() => {
-  protocol.handle('lumina', servirAudio);
-
-  ipcMain.handle('lumina:existe', (_evento, ruta) => {
-    try {
-      return typeof ruta === 'string' && fs.statSync(ruta).isFile();
-    } catch {
-      return false;
-    }
+/**
+ * Una sola ventana a la vez.
+ *
+ * Dos instancias comparten la misma base de datos y la misma cuenta, asi que
+ * cada una guardaria su propia posicion y la ultima en cerrarse pisaria a la
+ * otra. Volver a pulsar el acceso directo trae al frente la que ya estaba,
+ * que es lo que el usuario esperaba al pulsarlo.
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
   });
 
-  createWindow();
+  // Inicializar la aplicación cuando esté lista
+  app.whenReady().then(() => {
+    protocol.handle('lumina', servirAudio);
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    ipcMain.handle('lumina:existe', (_evento, ruta) => {
+      try {
+        return typeof ruta === 'string' && fs.statSync(ruta).isFile();
+      } catch {
+        return false;
+      }
+    });
+
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
   });
-});
+}
 
 // Salir cuando todas las ventanas estén cerradas, excepto en macOS
 app.on('window-all-closed', () => {

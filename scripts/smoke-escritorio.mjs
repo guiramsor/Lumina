@@ -7,6 +7,10 @@
  * ejecución. Lo único que lo delata es arrancarla y mirar.
  *
  *   npm run test:arranque
+ *
+ * Requiere que no haya otra Lumina abierta: desde que la aplicación solo
+ * admite una instancia, la segunda cede el turno y se cierra, y esto lo leería
+ * como un arranque fallido.
  */
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
