@@ -66,6 +66,38 @@ export function urlDeAudio(ruta) {
  */
 const CORS = { 'Access-Control-Allow-Origin': '*' };
 
+/**
+ * Interpreta la cabecera `Range`.
+ *
+ * Devuelve `{ inicio, fin }`, `'imposible'` si pide más allá del final, o null
+ * si no hay nada que recortar y toca servir el archivo entero.
+ *
+ * El caso del sufijo, `bytes=-500`, significa **los últimos 500 bytes**, no los
+ * primeros 501. Leerlo como un rango normal devolvía datos equivocados con un
+ * `Content-Range` que además decía otra cosa. Chromium pide `bytes=N-` para
+ * reproducir, así que no se notaba al escuchar; pero cualquiera que sondee la
+ * cola del archivo —que es donde muchos formatos guardan sus etiquetas— se
+ * llevaba la cabecera en vez del final.
+ */
+export function rangoPedido(cabecera, tamano) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec((cabecera || '').trim());
+  if (!m) return null; // Rango que no entendemos: se sirve entero, como manda el RFC.
+  const [, desde, hasta] = m;
+  if (!desde && !hasta) return null;
+
+  if (!desde) {
+    const pedidos = Number(hasta);
+    if (pedidos <= 0) return 'imposible';
+    const n = Math.min(pedidos, tamano);
+    return { inicio: tamano - n, fin: tamano - 1 };
+  }
+
+  const inicio = Number(desde);
+  const fin = hasta ? Math.min(Number(hasta), tamano - 1) : tamano - 1;
+  if (inicio >= tamano || inicio > fin) return 'imposible';
+  return { inicio, fin };
+}
+
 export function servirAudio(request) {
   const ruta = decodeURIComponent(new URL(request.url).searchParams.get('p') || '');
   if (!ruta) return new Response('Ruta vacía', { status: 400, headers: CORS });
@@ -77,11 +109,15 @@ export function servirAudio(request) {
     // El archivo se movió o se borró desde que se importó el libro.
     return new Response('No encontrado', { status: 404, headers: CORS });
   }
+  // Una carpeta se deja medir pero no leer: sin esto se anunciaba un 200 con
+  // el cuerpo reventando después, que es más difícil de diagnosticar.
+  if (!info.isFile()) return new Response('No es un archivo', { status: 404, headers: CORS });
 
   const tipo = tipoDe(ruta);
   const rango = request.headers.get('Range');
+  const pedido = rango ? rangoPedido(rango, info.size) : null;
 
-  if (!rango) {
+  if (!pedido) {
     return new Response(Readable.toWeb(fs.createReadStream(ruta)), {
       status: 200,
       headers: {
@@ -93,16 +129,14 @@ export function servirAudio(request) {
     });
   }
 
-  const coincidencia = /bytes=(\d*)-(\d*)/.exec(rango);
-  const inicio = coincidencia?.[1] ? Number(coincidencia[1]) : 0;
-  const fin = coincidencia?.[2] ? Math.min(Number(coincidencia[2]), info.size - 1) : info.size - 1;
-
-  if (inicio >= info.size || inicio > fin) {
+  if (pedido === 'imposible') {
     return new Response('Rango no satisfacible', {
       status: 416,
       headers: { 'Content-Range': `bytes */${info.size}`, ...CORS },
     });
   }
+
+  const { inicio, fin } = pedido;
 
   return new Response(Readable.toWeb(fs.createReadStream(ruta, { start: inicio, end: fin })), {
     status: 206,

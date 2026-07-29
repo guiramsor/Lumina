@@ -4,6 +4,7 @@ import android.content.Context
 import com.lumina.audiolibros.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -193,6 +194,17 @@ object SupabaseSync {
      * identificador, y los dos escriben en el mismo sitio. Sin esto cada uno
      * seguiría en su propia fila y no volverían a encontrarse.
      */
+    /**
+     * Lo máximo que se hace esperar al usuario antes de que empiece a sonar.
+     *
+     * Son dos peticiones con 15 s de espera cada una, así que sin este tope
+     * abrir un libro con mala cobertura se quedaba medio minuto en el spinner.
+     * Rendirse a tiempo es correcto: la lectura cuenta como fallida, y una
+     * lectura fallida ya prohíbe subir, así que no se puede pisar nada.
+     * Escuchar nunca debe depender de la nube.
+     */
+    private const val ESPERA_MAXIMA_MS = 8_000L
+
     suspend fun reconciliar(
         context: Context,
         fingerprint: String,
@@ -206,6 +218,7 @@ object SupabaseSync {
         val acceso = token(context)
             ?: return@withContext Result.failure(Exception("Sin sesión"))
 
+        withTimeoutOrNull(ESPERA_MAXIMA_MS) {
         runCatching {
             // Camino rápido: el libro ya sabe dónde vive.
             if (syncId != null) {
@@ -266,6 +279,10 @@ object SupabaseSync {
 
             Reconciliacion(idCanonico, leerFila(avanzada).copy(bookId = idCanonico))
         }.onFailure { android.util.Log.w("LuminaSync", "No se pudo reconciliar el libro", it) }
+        } ?: run {
+            android.util.Log.w("LuminaSync", "La nube no respondio en ${ESPERA_MAXIMA_MS}ms: se escucha en local")
+            Result.failure(Exception("La nube no respondio a tiempo"))
+        }
     }
 
     private fun posicionDe(fila: JSONObject): Double = EmparejarLibros.posicionAbsoluta(

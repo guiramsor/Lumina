@@ -120,7 +120,22 @@ class PlaybackService : MediaLibraryService() {
                 }
                 val (posicion, duracion) = posicionYDuracion()
                 GuardadoDeProgreso.guardar(this@PlaybackService, posicion, duracion, forzar = false)
+                avanzarTemporizadorDeSueno()
             }
+        }
+    }
+
+    /**
+     * El temporizador de sueño también corre aquí: es lo que hace que se
+     * cumpla con el móvil en el bolsillo y la pantalla apagada, que es cuando
+     * se usa. El reproductor solo se deja tocar desde el hilo principal.
+     */
+    private suspend fun avanzarTemporizadorDeSueno() {
+        val tic = TemporizadorDeSueno.tictac() ?: return
+        withContext(Dispatchers.Main) {
+            val p = session?.player ?: return@withContext
+            p.volume = tic.volumen
+            if (tic.pausar) p.pause()
         }
     }
 

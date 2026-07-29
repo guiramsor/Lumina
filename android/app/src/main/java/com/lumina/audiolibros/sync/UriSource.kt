@@ -16,8 +16,25 @@ class UriSource(
     private val uri: Uri,
 ) : Fingerprint.ByteSource {
 
+    /**
+     * Tamaño real del archivo. **Falla en vez de devolver cero.**
+     *
+     * `openFileDescriptor` devuelve null cuando no se puede abrir, y `statSize`
+     * vale −1 cuando el proveedor no sabe el tamaño. Dejar pasar cualquiera de
+     * los dos era peor que rendirse: la huella de una pista es
+     * `SHA-256(primer MiB ‖ último MiB ‖ tamaño)`, así que con tamaño 0 no se
+     * lee ni un byte y **todos los archivos ilegibles salían con la misma
+     * huella**. Y una huella compartida es una fila de nube compartida: dos
+     * libros distintos pisándose la posición el uno al otro.
+     *
+     * Quien llama ya trata el fallo como «este archivo no entra en la
+     * biblioteca», que es la respuesta correcta.
+     */
     override val size: Long by lazy {
-        resolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
+        val medido = resolver.openFileDescriptor(uri, "r")?.use { it.statSize }
+            ?: throw java.io.IOException("No se pudo abrir $uri para medirlo")
+        if (medido <= 0) throw java.io.IOException("Tamaño desconocido o vacío en $uri: $medido")
+        medido
     }
 
     override fun read(offset: Long, length: Int): ByteArray {

@@ -122,6 +122,27 @@ test('se adopta el identificador de la fila ajena y se retiran las sobrantes', a
   assert.deepEqual(db.llamadas.borrados, ['zzz-huella-del-pc'])
 })
 
+test('si la nube tarda demasiado se sigue sin ella, y NO se declara fiable', async () => {
+  // Abrir un libro esperaba hasta 30 s a la red antes de que sonara nada.
+  // Rendirse es correcto siempre que quede claro que no se ha leido: con
+  // ok:false no se subira, asi que no se puede pisar al otro dispositivo.
+  const colgada = new Promise(() => {}) // no resuelve jamas
+  const db = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({ maybeSingle: () => colgada }),
+        gte: () => ({ lte: () => colgada }),
+      }),
+    }),
+  }
+  const empezo = Date.now()
+  const r = await reconciliarLibro(libro, db)
+  const tardo = Date.now() - empezo
+  assert.equal(r.ok, false)
+  assert.equal(r.syncId, 'fila-compartida')
+  assert.ok(tardo < 12000, `tardo ${tardo} ms: el tope no salto`)
+})
+
 /* ---------------- resolveProgress ---------------- */
 
 test('una fila sin global no se toma por el principio del libro', () => {

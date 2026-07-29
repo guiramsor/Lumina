@@ -143,7 +143,40 @@ export async function pullProgress(syncId) {
  *
  * Nunca lanza: quedarse sin sincronizar es aceptable, no poder escuchar no.
  */
-export async function reconciliarLibro({ fingerprint, syncId, duracion, titulo, autor }, db = getClient()) {
+/**
+ * Lo máximo que se hace esperar al usuario antes de que empiece a sonar.
+ *
+ * Rendirse a tiempo es correcto: la lectura cuenta como fallida, y una lectura
+ * fallida ya prohíbe subir, así que no se puede pisar el avance del móvil.
+ * Escuchar nunca debe depender de la nube.
+ */
+const ESPERA_MAXIMA_MS = 8000
+
+function conTope(promesa, alRendirse) {
+  return new Promise((resolve) => {
+    const reloj = setTimeout(() => resolve(alRendirse()), ESPERA_MAXIMA_MS)
+    promesa.then(
+      (v) => {
+        clearTimeout(reloj)
+        resolve(v)
+      },
+      () => {
+        clearTimeout(reloj)
+        resolve(alRendirse())
+      }
+    )
+  })
+}
+
+export function reconciliarLibro(libro, db = getClient()) {
+  const porDefecto = { syncId: libro.syncId || libro.fingerprint, progreso: null, fusionadas: 0, ok: true }
+  return conTope(reconciliarSinTope(libro, db), () => {
+    console.warn(`La nube no respondió en ${ESPERA_MAXIMA_MS} ms: se escucha en local`)
+    return { ...porDefecto, ok: false }
+  })
+}
+
+async function reconciliarSinTope({ fingerprint, syncId, duracion, titulo, autor }, db) {
   const porDefecto = { syncId: syncId || fingerprint, progreso: null, fusionadas: 0, ok: true }
   if (!db || !fingerprint) return porDefecto
 

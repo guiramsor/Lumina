@@ -83,8 +83,33 @@ app.whenReady().then(async () => {
     const fuera = await net.fetch(urlDeAudio(ruta), { headers: { Range: 'bytes=5000-6000' } });
     comprobar('rango imposible: 416', fuera.status, 416);
 
+    // Sufijo: "los ultimos N bytes". Es el unico rango que no se lee de
+    // izquierda a derecha, y leerlo mal devolvia la cabecera del archivo
+    // haciendola pasar por su final. Muchos formatos guardan las etiquetas ahi.
+    const sufijo = await net.fetch(urlDeAudio(ruta), { headers: { Range: 'bytes=-100' } });
+    const cola = Buffer.from(await sufijo.arrayBuffer());
+    comprobar('sufijo: estado 206', sufijo.status, 206);
+    comprobar('sufijo: tamaño', cola.length, 100);
+    comprobar('sufijo: Content-Range', sufijo.headers.get('Content-Range'), 'bytes 900-999/1000');
+    comprobar('sufijo: son los ULTIMOS bytes', cola.equals(datos.subarray(900, 1000)), true);
+
+    // Un sufijo mayor que el archivo se recorta al archivo entero.
+    const sufijoLargo = await net.fetch(urlDeAudio(ruta), { headers: { Range: 'bytes=-5000' } });
+    comprobar('sufijo mayor que el archivo: 206', sufijoLargo.status, 206);
+    comprobar('sufijo mayor que el archivo: entero', (await sufijoLargo.arrayBuffer()).byteLength, 1000);
+
+    // Un Range que no entendemos no se inventa: se sirve el archivo entero.
+    const raro = await net.fetch(urlDeAudio(ruta), { headers: { Range: 'paginas=1-3' } });
+    comprobar('Range no reconocible: 200', raro.status, 200);
+    comprobar('Range no reconocible: entero', (await raro.arrayBuffer()).byteLength, 1000);
+
     const inexistente = await net.fetch(urlDeAudio(path.join(os.tmpdir(), 'no-existe-jamas.mp3')));
     comprobar('archivo ausente: 404', inexistente.status, 404);
+
+    // Una carpeta se deja medir pero no leer: antes se anunciaba un 200 y el
+    // cuerpo reventaba despues con EISDIR.
+    const carpeta = await net.fetch(urlDeAudio(os.tmpdir()));
+    comprobar('carpeta en vez de archivo: 404', carpeta.status, 404);
 
     // El preload corre con sandbox activado; conviene confirmar que aun asi
     // puede exponer webUtils, que es de donde sale la ruta de los archivos.

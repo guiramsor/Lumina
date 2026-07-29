@@ -12,7 +12,7 @@ import { paletteToVars, DEFAULT_PALETTE, getTheme } from './lib/theme.js'
 import { librosSinArchivo } from './lib/archivos.js'
 
 export default function App() {
-  const { loadBook, book: activeBook } = usePlayer()
+  const { loadBook, closeBook, book: activeBook } = usePlayer()
   useKeyboardShortcuts()
   const [books, setBooks] = useState([])
   const [progressMap, setProgressMap] = useState({})
@@ -92,6 +92,13 @@ export default function App() {
   }
 
   const onDelete = async (book) => {
+    // Soltarlo ANTES de borrarlo: si sigue cargado, el guardado periódico le
+    // vuelve a crear la fila de progreso que acabamos de borrar, y encima la
+    // sube a la nube.
+    if (activeBook?.id === book.id) {
+      closeBook()
+      setView('library')
+    }
     await dbDeleteBook(book.id)
     setBooks((prev) => prev.filter((b) => b.id !== book.id))
     setProgressMap((prev) => {
@@ -99,7 +106,6 @@ export default function App() {
       delete next[book.id]
       return next
     })
-    if (activeBook?.id === book.id) setView('library')
   }
 
   const palette = useMemo(() => {

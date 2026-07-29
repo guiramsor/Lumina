@@ -24,6 +24,7 @@ import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.library.Audiolibro
 import com.lumina.audiolibros.player.Catalogo
 import com.lumina.audiolibros.player.PlaybackService
+import com.lumina.audiolibros.player.TemporizadorDeSueno
 import com.lumina.audiolibros.sync.EmparejarLibros
 import com.lumina.audiolibros.sync.GuardadoDeProgreso
 import com.lumina.audiolibros.sync.SupabaseSync
@@ -265,42 +266,36 @@ class EstadoReproductor(
 
     /* ---------------- Temporizador de sueño ---------------- */
 
-    /**
-     * El temporizador guarda el instante en que debe callarse, no cuántos
-     * ticks le quedan: así no se desfasa si el reloj de la interfaz se retrasa,
-     * y lo que se muestra es siempre el tiempo real que queda.
+    /*
+     * La cuenta atrás la lleva TemporizadorDeSueno, y quien la hace avanzar es
+     * el servicio. Aquí solo se pone, se quita y se mira: si el reloj colgara
+     * de esta pantalla se congelaría al irse a segundo plano, que es justo
+     * cuando el temporizador tiene que hacer su trabajo.
      */
-    private var finSuenoEn: Long? = null
-
     fun iniciarSueno(minutos: Int) {
         AlmacenLocal.guardarMinutosSueno(context, minutos)
+        TemporizadorDeSueno.iniciar(minutos)
         modoSueno = ModoSueno.MINUTOS
-        finSuenoEn = System.currentTimeMillis() + minutos * 60_000L
         suenoRestanteS = minutos * 60
     }
 
     fun cancelarSueno() {
+        TemporizadorDeSueno.cancelar()
         modoSueno = ModoSueno.NINGUNO
-        finSuenoEn = null
         suenoRestanteS = 0
         controller?.volume = 1f
     }
 
-    /** Cuenta atrás con desvanecido en los últimos 12 s, como en el escritorio. */
-    fun tictacSueno() {
-        if (modoSueno != ModoSueno.MINUTOS) return
-        val fin = finSuenoEn ?: return
-        val restante = ((fin - System.currentTimeMillis()) / 1000).toInt()
-        suenoRestanteS = restante.coerceAtLeast(0)
-        val c = controller
-        if (restante <= 0) {
-            c?.pause()
-            c?.volume = 1f
+    /** Refleja en la interfaz lo que el temporizador lleva hecho por su cuenta. */
+    fun refrescarSueno() {
+        if (TemporizadorDeSueno.activo()) {
+            modoSueno = ModoSueno.MINUTOS
+            suenoRestanteS = TemporizadorDeSueno.restanteS
+        } else if (modoSueno != ModoSueno.NINGUNO) {
+            // Ha saltado mientras la pantalla no miraba.
             modoSueno = ModoSueno.NINGUNO
-            finSuenoEn = null
-            return
+            suenoRestanteS = 0
         }
-        c?.volume = if (restante <= 12) restante / 12f else 1f
     }
 
     fun anotarPausa() {
@@ -371,19 +366,13 @@ fun recordarEstadoReproductor(alcance: CoroutineScope): EstadoReproductor {
      * rastro: ni posición, ni nube, ni estadísticas.
      */
     LaunchedEffect(estado.controller) {
-        var segundoSueno = System.currentTimeMillis()
         while (true) {
             delay(500)
             val c = estado.controller ?: continue
             estado.posicionMs = c.currentPosition
             estado.duracionMs = c.duration.coerceAtLeast(0L)
             estado.refrescarEstadoSync()
-
-            val ahora = System.currentTimeMillis()
-            if (estado.modoSueno == ModoSueno.MINUTOS && estado.sonando && ahora - segundoSueno >= 1000) {
-                segundoSueno = ahora
-                estado.tictacSueno()
-            }
+            estado.refrescarSueno()
         }
     }
 

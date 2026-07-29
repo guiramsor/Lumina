@@ -521,6 +521,40 @@ export function PlayerProvider({ children }) {
     setIsPlaying(false)
   }, [persistProgress])
 
+  /**
+   * Suelta el libro entero, sin guardar nada.
+   *
+   * Es lo que hace falta al borrarlo: `unloadBook` guarda antes de soltar, y
+   * aquí guardar es justo lo que no se puede hacer. Sin esto, borrar el libro
+   * que estaba sonando lo dejaba sonando, con el mini-reproductor enseñando un
+   * libro que ya no existe, y el guardado periódico le volvía a crear su fila
+   * de progreso cada cuatro segundos —también en la nube—.
+   */
+  const closeBook = useCallback(() => {
+    const audio = audioRef.current
+    const prev = bookViewRef.current
+    audio?.pause()
+    if (audio) {
+      audio.removeAttribute('src')
+      audio.load()
+    }
+    bookViewRef.current = null
+    playbackRef.current = { trackIndex: 0, tracks: [] }
+    syncIdRef.current = null
+    remotePosRef.current = null
+    intencionRef.current = false
+    posicionGlobalRef.current = 0
+    statsRef.current = { pending: 0, lastTick: 0, lastFlush: 0 }
+    setBook(null)
+    setIsPlaying(false)
+    setCurrentTime(0)
+    setTrackIndex(0)
+    setTrackDuration(0)
+    setMissingFiles([])
+    setSyncState('inactivo')
+    if (prev) revokeBookView(prev)
+  }, [])
+
   /* ---------- Playback controls ---------- */
   const play = useCallback(() => {
     const audio = audioRef.current
@@ -854,6 +888,7 @@ export function PlayerProvider({ children }) {
     // controls
     loadBook,
     unloadBook,
+    closeBook,
     play,
     pause,
     togglePlay,
