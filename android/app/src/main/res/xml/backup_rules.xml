@@ -1,13 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lo mismo que data_extraction_rules.xml, para Android 11 y anteriores.
+  Las credenciales de Supabase no entran en la copia de seguridad, y la caché
+  de escaneo tampoco porque apunta a archivos que no se restauran.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="lumina_sync.xml" />
+    <exclude domain="sharedpref" path="lumina_escaneo.xml" />
 </full-backup-content>

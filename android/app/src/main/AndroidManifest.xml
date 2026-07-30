@@ -7,7 +7,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!--
+      WAKE_LOCK estaba declarado y no se usa: el servicio en primer plano ya
+      mantiene el proceso vivo, y nadie llama a setWakeMode. Un permiso de mas
+      es una pregunta de mas que responder en la ficha de Play y una razon mas
+      para que alguien desconfie de la app.
+    -->
 
     <!-- Solo para sincronizar la posicion con Supabase: el audio nunca sale del movil. -->
     <uses-permission android:name="android.permission.INTERNET" />

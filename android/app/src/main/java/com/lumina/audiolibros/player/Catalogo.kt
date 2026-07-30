@@ -95,7 +95,15 @@ object Catalogo {
      *
      * Llamar desde un hilo de fondo: consulta la nube.
      */
-    suspend fun prepararParaSonar(context: Context, libro: Audiolibro): Pair<MediaItem, Long> {
+    /**
+     * Lo que hace falta para arrancar un libro: qué sonar, desde dónde y a qué
+     * velocidad. La velocidad viaja aquí porque desde el coche no hay ninguna
+     * pantalla que la aplique, y sin ella un libro que escuchas siempre a
+     * 1,25× arrancaba a 1× sin dar ninguna pista de por qué.
+     */
+    data class ParaSonar(val item: MediaItem, val posicionMs: Long, val velocidad: Float)
+
+    suspend fun prepararParaSonar(context: Context, libro: Audiolibro): ParaSonar {
         val local = AlmacenLocal.progreso(context, libro.bookId)
         val guardado = AlmacenLocal.syncId(context, libro.bookId)
         val lectura = SupabaseSync.reconciliar(
@@ -127,6 +135,10 @@ object Catalogo {
         // Un libro terminado se reabre desde el principio.
         if (terminado) posicion = 0L
 
+        // La velocidad guardada de este libro manda sobre la de por defecto,
+        // igual que en la pantalla.
+        val velocidad = local?.velocidad ?: AlmacenLocal.velocidadPorDefecto(context)
+
         // Arrancar desde el coche tiene que dejar registrada la sesión igual
         // que abrirlo desde la pantalla: es lo que permite que el servicio
         // guarde la posición mientras se conduce, sin interfaz ninguna.
@@ -141,12 +153,12 @@ object Catalogo {
             posicionRemota = remoto?.let {
                 EmparejarLibros.posicionAbsoluta(it.posicionGlobalSegundos, it.posicionSegundos)
             },
-            velocidad = local?.velocidad ?: AlmacenLocal.velocidadPorDefecto(context),
+            velocidad = velocidad,
         )
         // Volver a empezar un libro terminado es una decisión, no inercia.
         if (terminado) GuardadoDeProgreso.marcarIntencionada()
 
         val tope = if (libro.duracionMs > 0) libro.duracionMs else Long.MAX_VALUE
-        return itemDe(libro, syncId) to posicion.coerceIn(0L, tope)
+        return ParaSonar(itemDe(libro, syncId), posicion.coerceIn(0L, tope), velocidad)
     }
 }

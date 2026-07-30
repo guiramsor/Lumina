@@ -6,6 +6,7 @@ import androidx.media3.session.SessionToken
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.util.concurrent.ListenableFuture
+import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.sync.GuardadoDeProgreso
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -113,6 +114,56 @@ class CatalogoDelCocheTest {
             assertTrue(
                 "la sesion quedo registrada pero bloqueada: no se guardaria nada en todo el viaje",
                 GuardadoDeProgreso.estaColocado(),
+            )
+        } finally {
+            instr.runOnMainSync { navegador.release() }
+        }
+    }
+
+    /**
+     * La velocidad guardada tambien manda en el coche.
+     *
+     * La aplicaba solo la pantalla del movil, asi que un libro arrancado desde
+     * el coche sonaba a 1x aunque lo escucharas siempre a 1,25x. No da ningun
+     * error: simplemente suena raro y no sabes por que.
+     */
+    @Test
+    fun elCocheRespetaLaVelocidadGuardada() {
+        val esperada = 1.75f
+        AlmacenLocal.guardarVelocidadPorDefecto(context, esperada)
+
+        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+        val navegador = enPrincipal { MediaBrowser.Builder(context, token).buildAsync() }
+
+        try {
+            val raiz = enPrincipal { navegador.getLibraryRoot(null) }
+            val hijos = enPrincipal { navegador.getChildren(raiz.value!!.mediaId, 0, 50, null) }
+            val elegido = hijos.value!!.first()
+
+            // Dejar el reproductor a otra velocidad para que el cambio se note.
+            instr.runOnMainSync { navegador.setPlaybackSpeed(1f) }
+            // La velocidad guardada de ESTE libro manda sobre la de por defecto.
+            val suya = AlmacenLocal.progreso(context, elegido.mediaId)?.velocidad ?: esperada
+
+            instr.runOnMainSync { navegador.setMediaItem(elegido) }
+
+            val limite = System.currentTimeMillis() + 25_000
+            while (System.currentTimeMillis() < limite &&
+                GuardadoDeProgreso.libroEnCurso() != elegido.mediaId
+            ) {
+                Thread.sleep(250)
+            }
+            // El servicio la aplica en cuanto resuelve el libro.
+            Thread.sleep(1_500)
+            val puesta = AtomicReference(0f)
+            instr.runOnMainSync { puesta.set(navegador.playbackParameters.speed) }
+            instr.runOnMainSync { navegador.pause() }
+
+            assertEquals(
+                "el coche no aplico la velocidad guardada",
+                suya,
+                puesta.get(),
+                0.01f,
             )
         } finally {
             instr.runOnMainSync { navegador.release() }

@@ -264,17 +264,23 @@ class PlaybackService : MediaLibraryService() {
                     return@launch
                 }
 
-                val (item, posicion) = Catalogo.prepararParaSonar(this@PlaybackService, libro)
+                val listo = Catalogo.prepararParaSonar(this@PlaybackService, libro)
                 // Si quien llama ya pidió una posición concreta, manda la suya.
-                val desde = if (startPositionMs == C.TIME_UNSET || startPositionMs <= 0) posicion
+                val desde = if (startPositionMs == C.TIME_UNSET || startPositionMs <= 0) listo.posicionMs
                 else startPositionMs
+                // La velocidad la aplicaba solo la pantalla del móvil, que
+                // desde el coche no existe: un libro que escuchas a 1,25×
+                // arrancaba a 1× sin dar ninguna pista de por qué.
+                withContext(Dispatchers.Main) {
+                    session.player.setPlaybackSpeed(listo.velocidad)
+                }
                 // El reproductor arranca ya en `desde`, así que a partir de
                 // aquí lo que marque es la escucha real y se puede guardar.
                 // Sin esto, arrancar desde el coche registraba la sesión pero
                 // no la desbloqueaba nunca, y no se guardaba una sola posición
                 // en todo el viaje.
                 GuardadoDeProgreso.colocado()
-                futuro.set(MediaSession.MediaItemsWithStartPosition(listOf(item), 0, desde))
+                futuro.set(MediaSession.MediaItemsWithStartPosition(listOf(listo.item), 0, desde))
             }
             return futuro
         }
