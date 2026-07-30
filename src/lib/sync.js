@@ -12,6 +12,7 @@ import { createClient } from '@supabase/supabase-js'
 import {
   agruparMismoLibro,
   elegirCanonica,
+  escrituraIncondicional,
   filaMasAvanzada,
   ganaLaRemota,
   posicionAbsoluta,
@@ -246,30 +247,50 @@ async function reconciliarSinTope({ fingerprint, syncId, duracion, titulo, autor
  * Sube la posición actual. `updatedAt` es el momento real de la escucha, no el
  * de la subida, para que una sincronización tardía no pise una escucha
  * posterior hecha en el otro dispositivo.
+ *
+ * La escritura es **condicional**: el servidor solo acepta la nueva posición si
+ * va por delante de la que ya hay. Comprobarlo aquí no bastaba, porque la
+ * referencia local se queda vieja en cuanto el otro dispositivo escribe algo
+ * (ver `escrituraIncondicional`), y entre leer y escribir cabe una sesión de
+ * escucha entera.
+ *
+ * La excepción sigue siendo la de siempre: si la posición la ha elegido el
+ * usuario, o el libro se ha terminado, manda aunque vaya hacia atrás.
  */
-export async function pushProgress(entry) {
-  const db = getClient()
+export async function pushProgress(entry, db = getClient()) {
   if (!db || !entry?.bookId) return false
+  const terminado = Boolean(entry.finished)
+
   try {
-    const { error } = await db.from('progress').upsert(
-      {
-        book_id: entry.bookId,
-        track_id: entry.trackId ?? null,
-        position: entry.position ?? 0,
-        global_position: entry.globalPosition ?? 0,
-        duration: entry.duration ?? null,
-        finished: Boolean(entry.finished),
-        title: entry.title ?? null,
-        author: entry.author ?? null,
-        device: deviceName(),
-        updated_at: new Date(entry.updatedAt || Date.now()).toISOString(),
-      },
-      { onConflict: 'user_id,book_id' }
-    )
+    const { error } = await db.rpc('guardar_progreso', {
+      p_book_id: entry.bookId,
+      p_global_position: entry.globalPosition ?? 0,
+      p_position: entry.position ?? 0,
+      p_track_id: entry.trackId ?? null,
+      p_duration: entry.duration ?? null,
+      p_finished: terminado,
+      p_title: entry.title ?? null,
+      p_author: entry.author ?? null,
+      p_device: deviceName(),
+      p_updated_at: new Date(entry.updatedAt || Date.now()).toISOString(),
+      p_incondicional: escrituraIncondicional({
+        terminado,
+        intencionado: entry.intencionado,
+      }),
+    })
     if (error) throw error
+    // `false` significa que el servidor la ha rechazado por ir por detrás, y
+    // eso es una respuesta correcta, no un fallo: la nube ya tiene algo mejor.
     return true
   } catch (err) {
-    console.warn('No se pudo subir el progreso', err)
+    if (/guardar_progreso|PGRST202|schema cache/i.test(err?.message || '')) {
+      console.error(
+        'Falta la funcion guardar_progreso en Supabase. Ejecuta supabase/schema.sql ' +
+          'en el SQL Editor: sin ella no se sube nada, para no pisar el otro dispositivo.'
+      )
+    } else {
+      console.warn('No se pudo subir el progreso', err)
+    }
     return false
   }
 }

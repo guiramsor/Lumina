@@ -338,6 +338,9 @@ export function PlayerProvider({ children }) {
         title: view.title,
         author: view.author,
         updatedAt,
+        // Manda al servidor si esta escritura puede ir hacia atrás. Solo las
+        // que ha elegido el usuario.
+        intencionado,
       }).then((bien) => {
         setSyncState(bien ? 'hecho' : 'fallo')
         if (bien) {

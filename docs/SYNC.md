@@ -120,6 +120,27 @@ Una fila por cuenta y libro:
    `persistProgress` en el escritorio— y ninguna otra ruta escribe en la nube.
    Ni el cierre de la app, ni el fin del libro, ni el arranque desde Android
    Auto. Una segunda puerta es una puerta que alguien se olvidará de cerrar.
+10. **Quien comprueba que no se retrocede es el servidor.** Nadie escribe en la
+    tabla `progress` directamente: se llama a la función `guardar_progreso`,
+    que solo acepta la posición si va por delante de la que ya hay.
+
+    La regla 3 no bastaba. Compara con la **última posición remota conocida**,
+    y esa solo se refresca al abrir el libro y con las subidas del propio
+    dispositivo: nunca se entera de lo que escribe el otro. Así que entre leer
+    y escribir no cabe un instante, cabe **una sesión de escucha entera**.
+    Bastaba con dejar el ordenador sonando y coger el móvil para que el móvil
+    pisara al ordenador en cada subida durante horas. Se vio pasar: una fila
+    bajó de 53828 s a 52452 s.
+
+    En el servidor la comprobación es atómica —no hay hueco entre mirar y
+    escribir— y ningún cliente puede saltársela por olvido.
+
+    La excepción de la regla 4 viaja como el parámetro `p_incondicional`: eso
+    solo lo sabe el cliente, porque depende de si has sido tú quien ha elegido
+    la posición. `escrituraIncondicional` decide cuándo se activa, y está
+    fijada con tests que comprueban que se abre **exactamente** por donde se
+    abre `debeSubir`. Si las dos se separaran, habría posiciones que el cliente
+    deja subir y el servidor rechaza.
 
 ### Cómo se lee la posición de una fila
 

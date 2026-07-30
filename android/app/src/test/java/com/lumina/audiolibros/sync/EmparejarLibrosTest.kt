@@ -186,4 +186,40 @@ class EmparejarLibrosTest {
     fun `sin nada remoto conocido siempre se sube`() {
         assertTrue(EmparejarLibros.debeSubir(42.0, null))
     }
+
+    /* ---------------- Escritura condicional ---------------- */
+
+    @Test
+    fun `una escritura por inercia va condicionada`() {
+        // La comprueba el servidor: `debeSubir` compara con una referencia que
+        // se queda vieja en cuanto el otro dispositivo escribe algo.
+        assertFalse(EmparejarLibros.escrituraIncondicional())
+        assertFalse(EmparejarLibros.escrituraIncondicional(terminado = false, intencionado = false))
+    }
+
+    @Test
+    fun `lo que elige el usuario se salta la condicion`() {
+        // Mismos casos que la excepcion de debeSubir: si no, un retroceso
+        // deliberado lo rechazaria el servidor por ir hacia atras.
+        assertTrue(EmparejarLibros.escrituraIncondicional(intencionado = true))
+        assertTrue(EmparejarLibros.escrituraIncondicional(terminado = true))
+    }
+
+    @Test
+    fun `la excepcion coincide exactamente con la de debeSubir`() {
+        // Las dos reglas tienen que abrirse por el mismo sitio. Si se separan,
+        // habria posiciones que el cliente deja subir y el servidor rechaza.
+        for (terminado in listOf(false, true)) {
+            for (intencionado in listOf(false, true)) {
+                val salta = EmparejarLibros.escrituraIncondicional(terminado, intencionado)
+                val exenta = EmparejarLibros.debeSubir(
+                    posicion = 0.0,
+                    posicionRemotaConocida = 99999.0,
+                    terminado = terminado,
+                    intencionado = intencionado,
+                )
+                assertEquals("terminado=$terminado intencionado=$intencionado", exenta, salta)
+            }
+        }
+    }
 }

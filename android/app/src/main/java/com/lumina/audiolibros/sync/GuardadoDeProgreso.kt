@@ -351,6 +351,8 @@ object GuardadoDeProgreso {
                 ),
                 titulo,
                 autor,
+                // Manda al servidor si esta escritura puede ir hacia atras.
+                intencionado = intencionada,
             )
         } finally {
             subiendo = false

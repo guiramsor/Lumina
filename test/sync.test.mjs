@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { reconciliarLibro, resolveProgress } from '../src/lib/sync.js'
+import { reconciliarLibro, resolveProgress, pushProgress } from '../src/lib/sync.js'
 
 /**
  * La bandera `ok` de reconciliarLibro.
@@ -141,6 +141,118 @@ test('si la nube tarda demasiado se sigue sin ella, y NO se declara fiable', asy
   assert.equal(r.ok, false)
   assert.equal(r.syncId, 'fila-compartida')
   assert.ok(tardo < 12000, `tardo ${tardo} ms: el tope no salto`)
+})
+
+/* ---------------- Escritura condicional ---------------- */
+
+/**
+ * Nube falsa con UNA fila, que aplica la condicion igual que la funcion
+ * `guardar_progreso` de supabase/schema.sql. Si la SQL y esto se separan, los
+ * tests dejan de significar nada: es la parte fragil de probar contra un doble.
+ */
+function nubeFalsa(filaInicial = null) {
+  const estado = { fila: filaInicial, llamadas: [] }
+  return {
+    estado,
+    async rpc(nombre, p) {
+      estado.llamadas.push({ nombre, incondicional: p.p_incondicional })
+      if (nombre !== 'guardar_progreso') return { error: new Error('funcion desconocida') }
+      const actual = estado.fila
+      const nueva = {
+        book_id: p.p_book_id,
+        global_position: p.p_global_position,
+        position: p.p_position,
+        duration: p.p_duration ?? actual?.duration ?? null,
+        title: p.p_title ?? actual?.title ?? null,
+        author: p.p_author ?? actual?.author ?? null,
+        finished: p.p_finished,
+      }
+      if (!actual) {
+        estado.fila = nueva
+        return { data: true, error: null }
+      }
+      if (p.p_incondicional || actual.global_position < p.p_global_position) {
+        estado.fila = nueva
+        return { data: true, error: null }
+      }
+      return { data: false, error: null } // rechazada por ir por detras
+    },
+  }
+}
+
+const escucha = (global, extra = {}) => ({
+  bookId: 'libro',
+  position: global,
+  globalPosition: global,
+  duration: 47631,
+  title: 'El Ritmo de la Guerra',
+  author: 'Brandon Sanderson',
+  updatedAt: Date.now(),
+  ...extra,
+})
+
+test('una escritura por inercia NO pisa una posicion mas avanzada', async () => {
+  // El caso real que se vio: el movil leyo 52452 al abrir, el PC escribio
+  // 53828 mientras tanto, y el movil subio 52486 creyendo que iba por delante.
+  // Se comio 22 minutos. Ahora lo para el servidor.
+  const db = nubeFalsa({ book_id: 'libro', global_position: 53828 })
+  assert.equal(await pushProgress(escucha(52486), db), true)
+  assert.equal(db.estado.fila.global_position, 53828, 'la nube no debe retroceder')
+  assert.equal(db.estado.llamadas[0].incondicional, false)
+})
+
+test('una escritura por inercia SI avanza la nube cuando va por delante', async () => {
+  const db = nubeFalsa({ book_id: 'libro', global_position: 52000 })
+  assert.equal(await pushProgress(escucha(52486), db), true)
+  assert.equal(db.estado.fila.global_position, 52486)
+})
+
+test('un retroceso elegido por el usuario si pisa la nube', async () => {
+  // Te has perdido y vuelves media hora atras: esa es tu posicion.
+  const db = nubeFalsa({ book_id: 'libro', global_position: 53828 })
+  assert.equal(await pushProgress(escucha(23400, { intencionado: true }), db), true)
+  assert.equal(db.estado.fila.global_position, 23400)
+  assert.equal(db.estado.llamadas[0].incondicional, true)
+})
+
+test('terminar el libro tambien pisa la nube', async () => {
+  const db = nubeFalsa({ book_id: 'libro', global_position: 53828 })
+  await pushProgress(escucha(0, { finished: true }), db)
+  assert.equal(db.estado.fila.finished, true)
+  assert.equal(db.estado.llamadas[0].incondicional, true)
+})
+
+test('un libro sin fila en la nube la crea', async () => {
+  const db = nubeFalsa(null)
+  assert.equal(await pushProgress(escucha(120), db), true)
+  assert.equal(db.estado.fila.global_position, 120)
+})
+
+test('una subida sin etiquetas no borra las que ya habia', async () => {
+  // Un cliente que aun no las sabe no debe dejar la fila sin duracion ni autor:
+  // sin duracion se vuelve invisible para la busqueda por parecido.
+  const db = nubeFalsa({
+    book_id: 'libro', global_position: 100, duration: 47631,
+    title: 'El Ritmo de la Guerra', author: 'Brandon Sanderson',
+  })
+  await pushProgress(
+    { bookId: 'libro', globalPosition: 200, position: 200, updatedAt: Date.now() },
+    db
+  )
+  assert.equal(db.estado.fila.duration, 47631)
+  assert.equal(db.estado.fila.author, 'Brandon Sanderson')
+})
+
+test('si falta la funcion en Supabase no se sube nada', async () => {
+  // Mejor no subir que subir a ciegas: quedarse sin sincronizar se ve en la
+  // barra, pisar el avance del otro dispositivo no se ve hasta que duele.
+  const db = { async rpc() { return { error: new Error('PGRST202: schema cache') } } }
+  assert.equal(await pushProgress(escucha(200), db), false)
+})
+
+test('si falla la red no se sube nada', async () => {
+  const db = { async rpc() { return { error: new Error('sin conexion') } } }
+  assert.equal(await pushProgress(escucha(200), db), false)
 })
 
 /* ---------------- resolveProgress ---------------- */

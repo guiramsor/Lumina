@@ -327,32 +327,57 @@ object SupabaseSync {
         progreso: Progreso,
         titulo: String?,
         autor: String? = null,
+        intencionado: Boolean = false,
     ): Boolean =
         withContext(Dispatchers.IO) {
             if (!configurado()) return@withContext false
             val acceso = token(context) ?: return@withContext false
             runCatching {
-                val fila = JSONObject()
-                    .put("book_id", progreso.bookId)
-                    .put("track_id", progreso.trackId ?: JSONObject.NULL)
-                    .put("position", progreso.posicionSegundos)
-                    .put("global_position", progreso.posicionGlobalSegundos)
-                    .put("duration", progreso.duracionSegundos ?: JSONObject.NULL)
-                    .put("finished", progreso.terminado)
-                    .put("title", titulo ?: JSONObject.NULL)
-                    .put("author", autor?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
-                    .put("device", "Móvil (Android)")
-                    .put("updated_at", iso8601(progreso.actualizadoEn))
+                // Se llama a `guardar_progreso` en vez de escribir la tabla
+                // directamente: la comprobación de que no se retrocede la hace
+                // el servidor, en la misma operación que la escritura, así que
+                // no hay hueco entre mirar y escribir. Ver supabase/schema.sql.
+                val argumentos = JSONObject()
+                    .put("p_book_id", progreso.bookId)
+                    .put("p_global_position", progreso.posicionGlobalSegundos)
+                    .put("p_position", progreso.posicionSegundos)
+                    .put("p_track_id", progreso.trackId ?: JSONObject.NULL)
+                    .put("p_duration", progreso.duracionSegundos ?: JSONObject.NULL)
+                    .put("p_finished", progreso.terminado)
+                    .put("p_title", titulo ?: JSONObject.NULL)
+                    .put("p_author", autor?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+                    .put("p_device", "Móvil (Android)")
+                    .put("p_updated_at", iso8601(progreso.actualizadoEn))
+                    .put(
+                        "p_incondicional",
+                        EmparejarLibros.escrituraIncondicional(
+                            terminado = progreso.terminado,
+                            intencionado = intencionado,
+                        )
+                    )
                 peticion(
                     metodo = "POST",
-                    ruta = "/rest/v1/progress",
-                    cuerpo = JSONArray().put(fila).toString(),
+                    ruta = "/rest/v1/rpc/guardar_progreso",
+                    cuerpo = argumentos.toString(),
                     token = acceso,
-                    // Upsert sobre la clave primaria (user_id, book_id).
-                    cabecerasExtra = mapOf("Prefer" to "resolution=merge-duplicates,return=minimal"),
                 )
+                // La funcion devuelve false si ha rechazado la posicion por ir
+                // por detras. Eso es una respuesta correcta, no un fallo: la
+                // nube ya tiene algo mejor y no hay nada que arreglar.
                 true
-            }.getOrElse { false }
+            }.getOrElse { error ->
+                if (error.message?.contains("guardar_progreso") == true ||
+                    error.message?.contains("PGRST202") == true
+                ) {
+                    android.util.Log.e(
+                        "LuminaSync",
+                        "Falta la funcion guardar_progreso en Supabase: ejecuta supabase/schema.sql. " +
+                            "Sin ella no se sube nada, para no pisar el otro dispositivo.",
+                        error,
+                    )
+                }
+                false
+            }
         }
 
     /**

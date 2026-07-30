@@ -169,3 +169,22 @@ export function debeSubir(
   if (posicionRemotaConocida == null) return true
   return posicion >= posicionRemotaConocida - 5
 }
+
+/**
+ * ¿Puede esta escritura pisar la fila de la nube sin mirar lo que hay?
+ *
+ * `debeSubir` compara con la **última posición remota conocida**, y esa solo se
+ * refresca al abrir el libro y con las subidas de este mismo dispositivo:
+ * nunca se entera de lo que escribe el otro. Así que la comparación queda
+ * desfasada durante toda la sesión de escucha, y un dispositivo puede pasarse
+ * horas pisando al otro sin saberlo.
+ *
+ * De ahí que la comprobación de verdad la haga el servidor, con una escritura
+ * condicional que solo acepta posiciones más avanzadas. Esta función dice
+ * cuándo hay que saltarse esa condición: exactamente en los mismos casos en que
+ * `debeSubir` se salta su regla, porque son los que **tú** has elegido y deben
+ * mandar aunque vayan hacia atrás.
+ */
+export function escrituraIncondicional({ terminado = false, intencionado = false } = {}) {
+  return Boolean(terminado || intencionado)
+}
