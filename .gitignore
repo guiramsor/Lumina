@@ -17,6 +17,9 @@ android/app/release/
 *.aab
 *.keystore
 *.jks
+# Contrasenas de la clave de firma. Perderlo impide volver a publicar
+# actualizaciones: hay que guardarlo aparte, no en el repositorio.
+android/keystore.properties
 
 # Biblioteca de prueba (varios GB)
 audios/

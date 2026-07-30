@@ -15,6 +15,20 @@ val entorno = Properties().apply {
 }
 fun entorno(clave: String): String = entorno.getProperty(clave, "").trim()
 
+// La firma de release vive fuera del repositorio, como las credenciales.
+//
+// Sin `keystore.properties` el proyecto compila igual, pero el APK de release
+// sale **sin firmar**: no se instala en ningun telefono ni se sube a Play. Era
+// el estado hasta ahora, y explica por que lo unico instalable era la
+// compilacion de depuracion, que va marcada DEBUGGABLE y firmada con la clave
+// de debug de Android Studio. Eso es justo lo que Play Protect mira con lupa.
+val firma = Properties().apply {
+    val archivo = rootProject.file("keystore.properties")
+    if (archivo.exists()) archivo.inputStream().use { load(it) }
+}
+val almacenDeFirma = firma.getProperty("storeFile")?.let { rootProject.file(it) }
+val hayFirma = almacenDeFirma?.exists() == true
+
 android {
     namespace = "com.lumina.audiolibros"
     compileSdk {
@@ -36,8 +50,30 @@ android {
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${entorno("VITE_SUPABASE_ANON_KEY")}\"")
     }
 
+    signingConfigs {
+        if (hayFirma) {
+            create("release") {
+                storeFile = almacenDeFirma
+                storePassword = firma.getProperty("storePassword")
+                keyAlias = firma.getProperty("keyAlias")
+                keyPassword = firma.getProperty("keyPassword")
+                // v1 (firma JAR) solo hace falta por debajo de API 24 y aqui
+                // el minimo es 26, asi que sobra. v2 y v3 son las que valida
+                // Android moderno, y v3 es la que permitiria rotar la clave
+                // algun dia sin perder la identidad de la app.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hayFirma) signingConfig = signingConfigs.getByName("release")
+            // Sin ofuscar ni encoger: es una app personal y R8 puede romper
+            // Compose o Media3 por reflexion sin avisar. Si algun dia se
+            // publica en Play conviene activarlo y volver a probar en serio.
             optimization {
                 enable = false
             }
