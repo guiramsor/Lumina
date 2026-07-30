@@ -131,8 +131,10 @@ object GuardadoDeProgreso {
      * La posición la ha elegido el usuario (barra o saltos), no la inercia de
      * la reproducción. Una posición elegida manda sobre la nube aunque sea
      * anterior: retroceder media hora tiene que persistir.
+     *
+     * Se consume con la subida que la lleva a la nube: ver `Intencion`.
      */
-    @Volatile private var intencionada = false
+    private val intencion = Intencion()
 
     /** Evita seguir guardando después de marcar el final. */
     @Volatile private var terminado = false
@@ -200,7 +202,7 @@ object GuardadoDeProgreso {
         this.lecturaFiable = lecturaFiable
         this.posicionRemota = posicionRemota
         this.velocidad = velocidad
-        intencionada = false
+        intencion.reiniciar()
         terminado = false
         colocado = false
         ultimaSubida = 0L
@@ -219,7 +221,7 @@ object GuardadoDeProgreso {
     }
 
     fun marcarIntencionada() {
-        intencionada = true
+        intencion.marcar()
     }
 
     fun fijarVelocidad(nueva: Float) {
@@ -307,7 +309,7 @@ object GuardadoDeProgreso {
                 msDesdeLaUltimaSubida = ahora - ultimaSubida,
                 forzar = forzar,
                 posicionRemota = posicionRemota,
-                intencionada = intencionada,
+                intencionada = intencion.activa(),
             )
         )
 
@@ -336,6 +338,10 @@ object GuardadoDeProgreso {
 
         ultimaSubida = ahora
         subiendo = true
+        // El sello se toma ANTES de salir: si el usuario vuelve a saltar
+        // mientras esta subida está en vuelo, al volver no habrá que bajar la
+        // bandera, porque ya no será la misma intención.
+        val selloDeEstaSubida = intencion.sello()
         val bien = try {
             SupabaseSync.subir(
                 context,
@@ -352,13 +358,17 @@ object GuardadoDeProgreso {
                 titulo,
                 autor,
                 // Manda al servidor si esta escritura puede ir hacia atras.
-                intencionado = intencionada,
+                intencionado = intencion.activa(),
             )
         } finally {
             subiendo = false
         }
         if (!bien) return anotar(Resultado.FALLO_AL_SUBIR)
 
+        // La intención ya está en la nube: deja de valer. Sin esto, un solo
+        // toque a «+30 s» dejaba todas las subidas de las horas siguientes
+        // saltándose la comprobación del servidor.
+        intencion.cumplida(selloDeEstaSubida)
         sincronizadoEn = System.currentTimeMillis()
         // Lo que acabamos de subir pasa a ser la referencia remota; si no, un
         // retroceso quedaría bloqueado en los guardados siguientes por su

@@ -12,6 +12,7 @@ import {
 import { ensureFingerprints, trackIndexByFingerprint } from '../lib/bookIdentity.js'
 import { reconciliarLibro, pushProgress, resolveProgress, haySesion } from '../lib/sync.js'
 import { debeSubir, posicionAbsoluta } from '../lib/emparejar.js'
+import { crearIntencion } from '../lib/intencion.js'
 
 /**
  * Smart rewind (estilo Audible): cuanto más tiempo lleves sin escuchar, más
@@ -105,8 +106,9 @@ export function PlayerProvider({ children }) {
   const syncIdRef = useRef(null) // fila de la nube en la que vive este libro
   // Marca que la posición la ha elegido el usuario (barra, saltos, marcadores),
   // no la inercia de la reproducción. Una posición elegida manda sobre la nube
-  // aunque sea anterior.
-  const intencionRef = useRef(false)
+  // aunque sea anterior, y se consume con la subida que la lleva allí.
+  const intencionRef = useRef(null)
+  if (!intencionRef.current) intencionRef.current = crearIntencion()
   const lecturaFiableRef = useRef(true)
   // Posición global viva. El estado de React solo se refresca cuatro veces por
   // segundo, así que diez pulsaciones seguidas de −15 s partirían casi todas
@@ -324,7 +326,9 @@ export function PlayerProvider({ children }) {
       }
       // No pisar una posición más avanzada guardada por el otro dispositivo,
       // salvo que esta la haya elegido el usuario.
-      const intencionado = intencionRef.current
+      const intencion = intencionRef.current
+      const intencionado = intencion.activa
+      const selloDeEstaSubida = intencion.sello
       if (!debeSubir(globalTime, remotePosRef.current, { terminado: finished, intencionado })) return
       lastPushRef.current = updatedAt
       setSyncState('subiendo')
@@ -347,6 +351,11 @@ export function PlayerProvider({ children }) {
           setSyncedAt(Date.now())
           // Lo que acabamos de subir pasa a ser la referencia remota.
           remotePosRef.current = globalTime
+          // Y la intención ya está en la nube: deja de valer. Sin esto, un solo
+          // toque a «+30 s» dejaba todas las subidas de las horas siguientes
+          // saltándose la comprobación del servidor. El sello evita borrar una
+          // intención posterior si el usuario ha vuelto a saltar mientras tanto.
+          intencion.cumplida(selloDeEstaSubida)
         }
       })
     },
@@ -430,7 +439,7 @@ export function PlayerProvider({ children }) {
       // Averigua en qué fila de la nube vive este libro. Si el archivo de este
       // equipo no es idéntico al del móvil, lo reconoce por duración y adopta
       // su identificador, para que los dos escriban en la misma fila.
-      intencionRef.current = false
+      intencionRef.current.reiniciar()
       const { syncId, progreso: remote, ok } = await reconciliarLibro({
         fingerprint: view.fingerprint,
         syncId: identified.syncId,
@@ -484,7 +493,7 @@ export function PlayerProvider({ children }) {
         startTrack = 0
         startTime = 0
         // Volver a empezar un libro terminado es una decisión, no inercia.
-        intencionRef.current = true
+        intencionRef.current.marcar()
       }
 
       // Rebobinado inteligente entre sesiones: retomar un poco antes de donde
@@ -545,7 +554,7 @@ export function PlayerProvider({ children }) {
     playbackRef.current = { trackIndex: 0, tracks: [] }
     syncIdRef.current = null
     remotePosRef.current = null
-    intencionRef.current = false
+    intencionRef.current.reiniciar()
     posicionGlobalRef.current = 0
     statsRef.current = { pending: 0, lastTick: 0, lastFlush: 0 }
     setBook(null)
@@ -599,7 +608,7 @@ export function PlayerProvider({ children }) {
       if (!view) return
       const clampedG = Math.max(0, Math.min(g, view.totalDuration || 0))
       lastPauseAtRef.current = null // búsqueda explícita: no aplicar rebobinado
-      intencionRef.current = true // la posición pasa a ser decisión del usuario
+      intencionRef.current.marcar() // la posición pasa a ser decisión del usuario
       posicionGlobalRef.current = clampedG
       let acc = 0
       let target = view.tracks.length - 1
@@ -632,12 +641,12 @@ export function PlayerProvider({ children }) {
   )
 
   const nextTrack = useCallback(() => {
-    intencionRef.current = true
+    intencionRef.current.marcar()
     goToTrack(playbackRef.current.trackIndex + 1, 0, isPlaying)
   }, [goToTrack, isPlaying])
 
   const prevTrack = useCallback(() => {
-    intencionRef.current = true
+    intencionRef.current.marcar()
     // If more than 3s in, restart current track; else go to previous.
     if (audioRef.current.currentTime > 3) {
       audioRef.current.currentTime = 0
@@ -649,7 +658,7 @@ export function PlayerProvider({ children }) {
 
   const jumpToTrack = useCallback(
     (index) => {
-      intencionRef.current = true
+      intencionRef.current.marcar()
       goToTrack(index, 0, true)
     },
     [goToTrack]
@@ -660,7 +669,7 @@ export function PlayerProvider({ children }) {
       const ch = chapters[index]
       const view = bookViewRef.current
       if (!ch || !view) return
-      intencionRef.current = true
+      intencionRef.current.marcar()
       if (ch.trackIndex === playbackRef.current.trackIndex) {
         lastPauseAtRef.current = null // salto explícito: no aplicar rebobinado
         audioRef.current.currentTime = Math.max(0, ch.start)
