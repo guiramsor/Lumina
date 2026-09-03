@@ -27,6 +27,7 @@ import com.lumina.audiolibros.player.PlaybackService
 import com.lumina.audiolibros.player.TemporizadorDeSueno
 import com.lumina.audiolibros.sync.EmparejarLibros
 import com.lumina.audiolibros.sync.GuardadoDeProgreso
+import com.lumina.audiolibros.sync.PosicionDelLibro
 import com.lumina.audiolibros.sync.SupabaseSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -158,10 +159,10 @@ class EstadoReproductor(
             GuardadoDeProgreso.abrir(
                 bookId = elegido.bookId,
                 syncId = idNube,
-                trackId = elegido.trackId,
+                duraciones = elegido.duraciones,
+                trackIds = elegido.pistas.map { it.trackId },
                 titulo = elegido.titulo,
                 autor = elegido.autor,
-                duracionMs = elegido.duracionMs,
                 lecturaFiable = lecturaRemotaFiable,
                 posicionRemota = remoto?.let {
                     EmparejarLibros.posicionAbsoluta(it.posicionGlobalSegundos, it.posicionSegundos)
@@ -180,11 +181,13 @@ class EstadoReproductor(
 
             // El mismo constructor que usa el coche: así la carátula, el título
             // y el autor se ven igual en la notificación y en Android Auto.
-            val item = Catalogo.itemDe(elegido, idNube)
+            val pistas = Catalogo.pistasDe(elegido, idNube)
+            // De la posición global del libro a «qué pista y por dónde de ella».
+            val punto = PosicionDelLibro.desdeGlobal(elegido.duraciones, posicion)
 
             // La posición se pasa al cargar el medio, no con un seekTo posterior:
             // así no hay ventana en la que el reproductor esté en el segundo 0.
-            c.setMediaItem(item, posicion)
+            c.setMediaItems(pistas, punto.indice, punto.dentro)
             c.setPlaybackSpeed(suya)
             c.prepare()
             c.play()
@@ -215,28 +218,32 @@ class EstadoReproductor(
         if (c.isPlaying) {
             c.pause()
         } else {
-            // Al reanudar tras una pausa larga, retroceder un poco.
+            // Al reanudar tras una pausa larga, retroceder un poco. En segundos
+            // del libro, para que pueda cruzar el borde de una pista.
             ultimaPausaEn?.let { pausa ->
                 val atras = segundosDeRebobinado(System.currentTimeMillis() - pausa) * 1000
-                if (atras > 0) c.seekTo((c.currentPosition - atras).coerceAtLeast(0L))
+                if (atras > 0) irA(posicionGlobal(c) - atras)
             }
             ultimaPausaEn = null
             c.play()
         }
     }
 
+    /**
+     * Saltar y buscar trabajan en segundos **del libro**, no del archivo: en un
+     * libro de capítulos, «+30 s» al final de una pista tiene que pasar a la
+     * siguiente, no quedarse clavado en el borde.
+     */
     fun saltar(segundos: Long) {
         val c = controller ?: return
-        val destino = (c.currentPosition + segundos * 1000).coerceIn(0L, c.duration.coerceAtLeast(0L))
-        c.seekTo(destino)
+        irA(posicionGlobal(c) + segundos * 1000)
         ultimaPausaEn = null
         GuardadoDeProgreso.marcarIntencionada()
         guardarAhora()
     }
 
-    fun buscar(ms: Long) {
-        val c = controller ?: return
-        c.seekTo(ms.coerceIn(0L, c.duration.coerceAtLeast(0L)))
+    fun buscar(globalMs: Long) {
+        irA(globalMs)
         ultimaPausaEn = null
         GuardadoDeProgreso.marcarIntencionada()
         guardarAhora()
@@ -257,11 +264,26 @@ class EstadoReproductor(
      */
     private fun guardarAhora() {
         val c = controller ?: return
-        val posicion = c.currentPosition
-        val duracion = c.duration
+        val indice = c.currentMediaItemIndex
+        val dentro = c.currentPosition
         alcance.launch {
-            GuardadoDeProgreso.guardar(context, posicion, duracion, forzar = true)
+            GuardadoDeProgreso.guardar(context, indice, dentro, forzar = true)
         }
+    }
+
+    /** Duraciones de las pistas del libro abierto, para traducir posiciones. */
+    private fun duraciones(): List<Long> = libro?.duraciones ?: emptyList()
+
+    /** Segundo del libro en el que va la escucha, sumando las pistas anteriores. */
+    private fun posicionGlobal(c: MediaController): Long =
+        PosicionDelLibro.aGlobal(duraciones(), c.currentMediaItemIndex, c.currentPosition)
+
+    /** Lleva la reproducción a un segundo del libro, sea la pista que sea. */
+    private fun irA(globalMs: Long) {
+        val c = controller ?: return
+        val tope = (libro?.duracionMs ?: 0L).coerceAtLeast(0L)
+        val punto = PosicionDelLibro.desdeGlobal(duraciones(), globalMs.coerceIn(0L, tope))
+        c.seekTo(punto.indice, punto.dentro)
     }
 
     /* ---------------- Temporizador de sueño ---------------- */
@@ -300,6 +322,13 @@ class EstadoReproductor(
 
     fun anotarPausa() {
         ultimaPausaEn = System.currentTimeMillis()
+    }
+
+    /** Lo que pinta la barra: siempre en segundos del libro entero. */
+    fun refrescarPosicion() {
+        val c = controller ?: return
+        posicionMs = posicionGlobal(c)
+        duracionMs = libro?.duracionMs ?: 0L
     }
 
     /**
@@ -369,8 +398,7 @@ fun recordarEstadoReproductor(alcance: CoroutineScope): EstadoReproductor {
         while (true) {
             delay(500)
             val c = estado.controller ?: continue
-            estado.posicionMs = c.currentPosition
-            estado.duracionMs = c.duration.coerceAtLeast(0L)
+            estado.refrescarPosicion()
             estado.refrescarEstadoSync()
             estado.refrescarSueno()
         }

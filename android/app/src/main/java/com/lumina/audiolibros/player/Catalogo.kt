@@ -10,6 +10,7 @@ import com.lumina.audiolibros.library.Audiolibro
 import com.lumina.audiolibros.library.Metadatos
 import com.lumina.audiolibros.sync.EmparejarLibros
 import com.lumina.audiolibros.sync.GuardadoDeProgreso
+import com.lumina.audiolibros.sync.PosicionDelLibro
 import com.lumina.audiolibros.sync.SupabaseSync
 
 /** Identificador de la carpeta raíz que ve el coche al abrir Lumina. */
@@ -42,36 +43,54 @@ object Catalogo {
             ?: libros(context, refrescar = true).firstOrNull { it.bookId == mediaId }
 
     /**
-     * El libro convertido en algo reproducible.
+     * El libro tal y como lo ve el coche al navegar el catálogo.
+     *
+     * Sin URI a propósito: es la ficha del **libro**, no de un archivo. Cuando
+     * el coche manda reproducirlo, el servicio lo expande en sus pistas.
      *
      * La portada viaja como bytes dentro de los metadatos: es lo que hace que
-     * se vea en la notificación del móvil y en la pantalla del coche. El
-     * identificador de la fila de la nube va en los extras porque el servicio
-     * guarda la posición cuando la pantalla ya no existe.
+     * se vea en la notificación del móvil y en la pantalla del coche.
      */
     fun itemDe(libro: Audiolibro, syncId: String? = null): MediaItem =
         MediaItem.Builder()
-            .setUri(libro.uri)
             .setMediaId(libro.bookId)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(libro.titulo)
-                    .setArtist(libro.autor.ifEmpty { "Audiolibro" })
-                    .setAlbumTitle(libro.titulo)
-                    .setIsPlayable(true)
-                    .setIsBrowsable(false)
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_AUDIO_BOOK)
-                    .setArtworkData(
-                        Metadatos.portadaParaLaSesion(libro.portada),
-                        MediaMetadata.PICTURE_TYPE_FRONT_COVER,
-                    )
-                    .setExtras(
-                        Bundle().apply {
-                            putString(EXTRA_TRACK_ID, libro.trackId)
-                            if (syncId != null) putString(EXTRA_SYNC_ID, syncId)
-                        }
-                    )
-                    .build()
+            .setMediaMetadata(metadatosDe(libro, libro.pistas.first().trackId, syncId))
+            .build()
+
+    /**
+     * Las pistas del libro, listas para sonar.
+     *
+     * Todas llevan el título, el autor y la portada del **libro**, no los del
+     * archivo: en la notificación y en el coche se lee el libro, no
+     * «Capítulo 07.mp3». Lo que cambia en cada una es su propia huella, que es
+     * lo que permite al otro dispositivo saber en qué pista se estaba.
+     */
+    fun pistasDe(libro: Audiolibro, syncId: String? = null): List<MediaItem> =
+        libro.pistas.map { pista ->
+            MediaItem.Builder()
+                .setUri(pista.uri)
+                .setMediaId(libro.bookId)
+                .setMediaMetadata(metadatosDe(libro, pista.trackId, syncId))
+                .build()
+        }
+
+    private fun metadatosDe(libro: Audiolibro, trackId: String, syncId: String?): MediaMetadata =
+        MediaMetadata.Builder()
+            .setTitle(libro.titulo)
+            .setArtist(libro.autor.ifEmpty { "Audiolibro" })
+            .setAlbumTitle(libro.titulo)
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_AUDIO_BOOK)
+            .setArtworkData(
+                Metadatos.portadaParaLaSesion(libro.portada),
+                MediaMetadata.PICTURE_TYPE_FRONT_COVER,
+            )
+            .setExtras(
+                Bundle().apply {
+                    putString(EXTRA_TRACK_ID, trackId)
+                    if (syncId != null) putString(EXTRA_SYNC_ID, syncId)
+                }
             )
             .build()
 
@@ -101,7 +120,12 @@ object Catalogo {
      * pantalla que la aplique, y sin ella un libro que escuchas siempre a
      * 1,25× arrancaba a 1× sin dar ninguna pista de por qué.
      */
-    data class ParaSonar(val item: MediaItem, val posicionMs: Long, val velocidad: Float)
+    data class ParaSonar(
+        val pistas: List<MediaItem>,
+        val indice: Int,
+        val dentroMs: Long,
+        val velocidad: Float,
+    )
 
     suspend fun prepararParaSonar(context: Context, libro: Audiolibro): ParaSonar {
         val local = AlmacenLocal.progreso(context, libro.bookId)
@@ -145,10 +169,10 @@ object Catalogo {
         GuardadoDeProgreso.abrir(
             bookId = libro.bookId,
             syncId = syncId,
-            trackId = libro.trackId,
+            duraciones = libro.duraciones,
+            trackIds = libro.pistas.map { it.trackId },
             titulo = libro.titulo,
             autor = libro.autor,
-            duracionMs = libro.duracionMs,
             lecturaFiable = fiable,
             posicionRemota = remoto?.let {
                 EmparejarLibros.posicionAbsoluta(it.posicionGlobalSegundos, it.posicionSegundos)
@@ -159,6 +183,8 @@ object Catalogo {
         if (terminado) GuardadoDeProgreso.marcarIntencionada()
 
         val tope = if (libro.duracionMs > 0) libro.duracionMs else Long.MAX_VALUE
-        return ParaSonar(itemDe(libro, syncId), posicion.coerceIn(0L, tope), velocidad)
+        // De la posición global del libro a «qué pista y por dónde de ella».
+        val punto = PosicionDelLibro.desdeGlobal(libro.duraciones, posicion.coerceIn(0L, tope))
+        return ParaSonar(pistasDe(libro, syncId), punto.indice, punto.dentro, velocidad)
     }
 }

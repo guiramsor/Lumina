@@ -142,6 +142,36 @@ Una fila por cuenta y libro:
     abre `debeSubir`. Si las dos se separaran, habría posiciones que el cliente
     deja subir y el servidor rechaza.
 
+### El orden de las pistas y la posición global
+
+Un libro puede ser varios archivos, y **cada dispositivo puede repartirlo de
+otra forma**: el mismo libro puede estar en el ordenador como doce capítulos y
+en el móvil como un archivo único.
+
+Por eso lo que viaja es la posición **global**: los segundos desde el principio
+del libro, no desde el principio del archivo.
+
+```
+global = duración de las pistas anteriores + lo que llevas de la actual
+```
+
+Eso obliga a que las dos plataformas **ordenen las pistas igual**. Si no, «hora
+6» cae en un capítulo distinto en cada una. El orden es por nombre de archivo,
+con los números comparados como números («Parte 2» antes que «Parte 10») y sin
+distinguir mayúsculas ni acentos. Está en `ordenarPistas` de
+`src/lib/ordenPistas.js` y en `OrdenDePistas` de Kotlin, con los mismos
+vectores congelados en los tests de ambas.
+
+La traducción entre global y «pista + segundo dentro» vive en
+`posicionDelLibro.js` y `PosicionDelLibro.kt`, también con vectores comunes.
+
+Y de aquí sale un requisito para el móvil: **tiene que agrupar los archivos de
+una carpeta en un libro**, con el mismo criterio que el escritorio (carpeta +
+etiqueta de álbum). Mientras trató cada archivo como un libro, la huella de un
+libro de doce capítulos no podía coincidir nunca con doce huellas de una pista,
+ni las duraciones tampoco —trece horas contra una—, así que esos libros no
+sincronizaban y no había ningún error que lo dijera.
+
 ### Cómo se lee la posición de una fila
 
 Las dos plataformas deben leer idéntico el mismo dato:

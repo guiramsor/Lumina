@@ -106,9 +106,18 @@ object GuardadoDeProgreso {
 
     @Volatile private var bookId: String? = null
     @Volatile private var syncId: String? = null
-    @Volatile private var trackId: String? = null
     @Volatile private var titulo: String? = null
     @Volatile private var autor: String? = null
+
+    /**
+     * Las pistas del libro abierto, en el orden del contrato.
+     *
+     * Hacen falta para traducir «pista 7, minuto 3» a la posición global que es
+     * lo único que viaja por la nube, y para saber qué huella de pista subir:
+     * el otro dispositivo la usa para retomar en la pista exacta.
+     */
+    @Volatile private var duraciones: List<Long> = emptyList()
+    @Volatile private var trackIds: List<String> = emptyList()
 
     /**
      * Duración sabida al abrir, de la biblioteca del teléfono.
@@ -185,20 +194,24 @@ object GuardadoDeProgreso {
     fun abrir(
         bookId: String,
         syncId: String,
-        trackId: String?,
+        duraciones: List<Long>,
+        trackIds: List<String>,
         titulo: String?,
         autor: String?,
-        duracionMs: Long,
         lecturaFiable: Boolean,
         posicionRemota: Double?,
         velocidad: Float = 1f,
     ) {
         this.bookId = bookId
         this.syncId = syncId
-        this.trackId = trackId
+        this.duraciones = duraciones
+        this.trackIds = trackIds
         this.titulo = titulo
         this.autor = autor
-        this.duracionConocidaMs = duracionMs
+        // La duración del libro sale de sus pistas, no del reproductor: el
+        // reproductor solo sabe lo que dura el archivo que tiene puesto, que en
+        // un libro de doce capítulos es una doceava parte.
+        this.duracionConocidaMs = duraciones.sumOf { it.coerceAtLeast(0) }
         this.lecturaFiable = lecturaFiable
         this.posicionRemota = posicionRemota
         this.velocidad = velocidad
@@ -245,24 +258,21 @@ object GuardadoDeProgreso {
     /* ---------------- Guardado ---------------- */
 
     /**
-     * Duración que se puede afirmar del libro.
-     *
-     * La del reproductor manda cuando la sabe; si no, la que traía la
-     * biblioteca al abrir. Nunca se devuelve un valor sin sentido.
-     */
-    private fun duracionSegura(delReproductorMs: Long): Long =
-        if (delReproductorMs > 0) delReproductorMs else duracionConocidaMs
-
-    /**
      * Guarda la posición: siempre en el disco, y en la nube solo si se cumplen
      * todas las reglas de docs/SYNC.md.
+     *
+     * Se recibe **dónde está el reproductor** —en qué pista y por qué punto de
+     * ella— y aquí se traduce a la posición global del libro, que es lo único
+     * que viaja. La duración del libro no se le pregunta al reproductor: él
+     * solo sabe lo que dura el archivo que tiene puesto, que en un libro de
+     * doce capítulos es una doceava parte.
      */
     suspend fun guardar(
         context: Context,
-        posicionMs: Long,
-        duracionDelReproductorMs: Long,
+        indiceDePista: Int,
+        dentroDeLaPistaMs: Long,
         forzar: Boolean,
-    ): Resultado = aplicar(context, posicionMs, duracionDelReproductorMs, forzar, marcaFinal = false)
+    ): Resultado = aplicar(context, indiceDePista, dentroDeLaPistaMs, forzar, marcaFinal = false)
 
     /**
      * El libro ha llegado al final.
@@ -272,29 +282,38 @@ object GuardadoDeProgreso {
      * ordenador, y al reabrirlo se quedaba parado en el último segundo en vez
      * de empezar de nuevo.
      */
-    suspend fun marcarTerminado(
-        context: Context,
-        posicionMs: Long,
-        duracionDelReproductorMs: Long,
-    ): Resultado {
+    suspend fun marcarTerminado(context: Context): Resultado {
         if (terminado) return ultimoResultado
-        val r = aplicar(context, posicionMs, duracionDelReproductorMs, forzar = true, marcaFinal = true)
+        val ultima = (duraciones.size - 1).coerceAtLeast(0)
+        val r = aplicar(
+            context,
+            indiceDePista = ultima,
+            dentroDeLaPistaMs = duraciones.getOrElse(ultima) { 0L },
+            forzar = true,
+            marcaFinal = true,
+        )
         terminado = true
         return r
     }
 
     private suspend fun aplicar(
         context: Context,
-        posicionMs: Long,
-        duracionDelReproductorMs: Long,
+        indiceDePista: Int,
+        dentroDeLaPistaMs: Long,
         forzar: Boolean,
         marcaFinal: Boolean,
     ): Resultado {
         val libro = bookId
-        val duracion = duracionSegura(duracionDelReproductorMs)
+        val duracion = duracionConocidaMs
         val ahora = System.currentTimeMillis()
-        // Al terminar se guarda la duración entera, que es donde se ha quedado.
-        val posicion = if (marcaFinal && duracion > 0) duracion else posicionMs
+        // Lo que viaja es la posición global: la suma de lo que duran las
+        // pistas anteriores más lo que se lleva de la actual.
+        val posicion =
+            if (marcaFinal && duracion > 0) duracion
+            else PosicionDelLibro.aGlobal(duraciones, indiceDePista, dentroDeLaPistaMs)
+        // La huella de la pista en la que se está, para que el otro dispositivo
+        // pueda retomar en ella exactamente.
+        val pistaActual = trackIds.getOrNull(indiceDePista)
 
         val veredicto = decidir(
             Circunstancias(
@@ -347,7 +366,7 @@ object GuardadoDeProgreso {
                 context,
                 SupabaseSync.Progreso(
                     bookId = syncId ?: libro,
-                    trackId = trackId,
+                    trackId = pistaActual,
                     posicionSegundos = posicion / 1000.0,
                     posicionGlobalSegundos = posicion / 1000.0,
                     duracionSegundos = duracion / 1000.0,

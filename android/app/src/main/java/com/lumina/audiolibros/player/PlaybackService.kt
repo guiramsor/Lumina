@@ -85,11 +85,12 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
+                    // ExoPlayer solo llega a ENDED al acabar la ultima pista de
+                    // la lista, asi que aqui el libro esta de verdad terminado.
                     pararReloj()
-                    val duracion = player.duration
                     alcance.launch {
                         GuardadoDeProgreso.volcarEscucha(this@PlaybackService)
-                        GuardadoDeProgreso.marcarTerminado(this@PlaybackService, duracion, duracion)
+                        GuardadoDeProgreso.marcarTerminado(this@PlaybackService)
                     }
                 }
             }
@@ -118,8 +119,8 @@ class PlaybackService : MediaLibraryService() {
                 if (delta in 0.0..2.0) {
                     GuardadoDeProgreso.sumarEscucha(this@PlaybackService, delta)
                 }
-                val (posicion, duracion) = posicionYDuracion()
-                GuardadoDeProgreso.guardar(this@PlaybackService, posicion, duracion, forzar = false)
+                val (indice, dentro) = dondeVaLaEscucha()
+                GuardadoDeProgreso.guardar(this@PlaybackService, indice, dentro, forzar = false)
                 avanzarTemporizadorDeSueno()
             }
         }
@@ -144,17 +145,23 @@ class PlaybackService : MediaLibraryService() {
         reloj = null
     }
 
-    /** ExoPlayer solo se deja consultar desde el hilo principal. */
-    private suspend fun posicionYDuracion(): Pair<Long, Long> = withContext(Dispatchers.Main) {
+    /**
+     * En qué pista va la escucha y por qué punto de ella.
+     *
+     * ExoPlayer solo se deja consultar desde el hilo principal. Se devuelve el
+     * índice y no la duración porque la del reproductor es la del archivo que
+     * tiene puesto, que en un libro de capítulos no es la del libro.
+     */
+    private suspend fun dondeVaLaEscucha(): Pair<Int, Long> = withContext(Dispatchers.Main) {
         val p = session?.player
-        (p?.currentPosition ?: -1L) to (p?.duration ?: 0L)
+        (p?.currentMediaItemIndex ?: 0) to (p?.currentPosition ?: -1L)
     }
 
     private fun guardarLoQueSuena(forzar: Boolean) {
         alcance.launch {
             GuardadoDeProgreso.volcarEscucha(this@PlaybackService)
-            val (posicion, duracion) = posicionYDuracion()
-            GuardadoDeProgreso.guardar(this@PlaybackService, posicion, duracion, forzar)
+            val (indice, dentro) = dondeVaLaEscucha()
+            GuardadoDeProgreso.guardar(this@PlaybackService, indice, dentro, forzar)
         }
     }
 
@@ -212,7 +219,12 @@ class PlaybackService : MediaLibraryService() {
             return futuro
         }
 
-        /** Devolver los libros con su URI: sin ella no hay nada que reproducir. */
+        /**
+         * Devolver los libros con su URI: sin ella no hay nada que reproducir.
+         *
+         * Un libro puede ser varias pistas, asi que una ficha se convierte en
+         * tantos elementos como capitulos tenga.
+         */
         override fun onAddMediaItems(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -220,7 +232,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<MutableList<MediaItem>> {
             val futuro = SettableFuture.create<MutableList<MediaItem>>()
             alcance.launch {
-                futuro.set(mediaItems.map { resolver(it) }.toMutableList())
+                futuro.set(mediaItems.flatMap { resolver(it) }.toMutableList())
             }
             return futuro
         }
@@ -258,7 +270,7 @@ class PlaybackService : MediaLibraryService() {
                 if (libro == null) {
                     futuro.set(
                         MediaSession.MediaItemsWithStartPosition(
-                            mediaItems.map { resolver(it) }, indice, startPositionMs
+                            mediaItems.flatMap { resolver(it) }, indice, startPositionMs
                         )
                     )
                     return@launch
@@ -266,8 +278,9 @@ class PlaybackService : MediaLibraryService() {
 
                 val listo = Catalogo.prepararParaSonar(this@PlaybackService, libro)
                 // Si quien llama ya pidió una posición concreta, manda la suya.
-                val desde = if (startPositionMs == C.TIME_UNSET || startPositionMs <= 0) listo.posicionMs
-                else startPositionMs
+                val sinPeticion = startPositionMs == C.TIME_UNSET || startPositionMs <= 0
+                val pistaInicial = if (sinPeticion) listo.indice else 0
+                val desde = if (sinPeticion) listo.dentroMs else startPositionMs
                 // La velocidad la aplicaba solo la pantalla del móvil, que
                 // desde el coche no existe: un libro que escuchas a 1,25×
                 // arrancaba a 1× sin dar ninguna pista de por qué.
@@ -280,15 +293,15 @@ class PlaybackService : MediaLibraryService() {
                 // no la desbloqueaba nunca, y no se guardaba una sola posición
                 // en todo el viaje.
                 GuardadoDeProgreso.colocado()
-                futuro.set(MediaSession.MediaItemsWithStartPosition(listOf(listo.item), 0, desde))
+                futuro.set(MediaSession.MediaItemsWithStartPosition(listo.pistas, pistaInicial, desde))
             }
             return futuro
         }
 
-        private fun resolver(item: MediaItem): MediaItem {
-            if (item.localConfiguration != null) return item
-            val libro = Catalogo.porId(this@PlaybackService, item.mediaId) ?: return item
-            return Catalogo.itemDe(libro)
+        private fun resolver(item: MediaItem): List<MediaItem> {
+            if (item.localConfiguration != null) return listOf(item)
+            val libro = Catalogo.porId(this@PlaybackService, item.mediaId) ?: return listOf(item)
+            return Catalogo.pistasDe(libro)
         }
     }
 
@@ -305,8 +318,8 @@ class PlaybackService : MediaLibraryService() {
             return
         }
 
-        val posicionMs = player.currentPosition
-        val duracionMs = player.duration
+        val indiceDePista = player.currentMediaItemIndex
+        val dentroMs = player.currentPosition
         pararReloj()
         player.pause()
 
@@ -324,7 +337,7 @@ class PlaybackService : MediaLibraryService() {
             // vale más cerrar limpio que quedarse colgado.
             withTimeoutOrNull(8_000) {
                 GuardadoDeProgreso.volcarEscucha(this@PlaybackService)
-                GuardadoDeProgreso.guardar(this@PlaybackService, posicionMs, duracionMs, forzar = true)
+                GuardadoDeProgreso.guardar(this@PlaybackService, indiceDePista, dentroMs, forzar = true)
             }
             // ExoPlayer solo admite llamadas desde el hilo principal: pararlo
             // desde el hilo de red lanzaría una excepción.
