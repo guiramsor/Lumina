@@ -257,40 +257,107 @@ async function reconciliarSinTope({ fingerprint, syncId, duracion, titulo, autor
  * La excepción sigue siendo la de siempre: si la posición la ha elegido el
  * usuario, o el libro se ha terminado, manda aunque vaya hacia atrás.
  */
+/**
+ * ¿Es este error un «la función no está instalada» y no un fallo de red?
+ *
+ * PostgREST responde 404 con el código PGRST202 cuando no encuentra la función
+ * en su caché de esquema.
+ */
+function faltaLaFuncion(err) {
+  const m = `${err?.message || ''} ${err?.code || ''}`
+  return /PGRST202|schema cache|Could not find the function|guardar_progreso/i.test(m)
+}
+
+/**
+ * Proyectos en los que ya se ha comprobado que la función no está.
+ *
+ * Va por cliente y no en una variable suelta para que el hecho pertenezca al
+ * proyecto de Supabase que lo tiene, que es de quien es: dos clientes
+ * distintos no comparten esquema, y en los tests cada doble es un objeto
+ * aparte y no se contamina con el anterior.
+ */
+const sinFuncion = new WeakSet()
+const yaAvisados = new WeakSet()
+
+/**
+ * Camino de respaldo cuando `guardar_progreso` no está instalada.
+ *
+ * Hace la misma comprobación pero en dos pasos, así que entre leer y escribir
+ * queda una ventana de unos milisegundos. Es muchísimo mejor que el upsert a
+ * ciegas de antes —cuya ventana era la sesión de escucha entera— y sobre todo
+ * permite que la sincronización funcione sin tener que ejecutar nada a mano.
+ *
+ * Cuando la función esté instalada, la comprobación pasa a ser atómica sola.
+ */
+async function subidaCondicionalEnDosPasos(db, fila, incondicional) {
+  if (!incondicional) {
+    const { data, error } = await db
+      .from('progress')
+      .select('global_position')
+      .eq('book_id', fila.book_id)
+      .maybeSingle()
+    if (error) throw error
+    // La nube ya va por delante: no hay nada que escribir, y eso no es un fallo.
+    if (data && (data.global_position ?? 0) >= fila.global_position) return true
+  }
+  const { error } = await db.from('progress').upsert(fila, { onConflict: 'user_id,book_id' })
+  if (error) throw error
+  return true
+}
+
 export async function pushProgress(entry, db = getClient()) {
   if (!db || !entry?.bookId) return false
   const terminado = Boolean(entry.finished)
+  const incondicional = escrituraIncondicional({
+    terminado,
+    intencionado: entry.intencionado,
+  })
+
+  const fila = {
+    book_id: entry.bookId,
+    track_id: entry.trackId ?? null,
+    position: entry.position ?? 0,
+    global_position: entry.globalPosition ?? 0,
+    duration: entry.duration ?? null,
+    finished: terminado,
+    title: entry.title ?? null,
+    author: entry.author ?? null,
+    device: deviceName(),
+    updated_at: new Date(entry.updatedAt || Date.now()).toISOString(),
+  }
 
   try {
-    const { error } = await db.rpc('guardar_progreso', {
-      p_book_id: entry.bookId,
-      p_global_position: entry.globalPosition ?? 0,
-      p_position: entry.position ?? 0,
-      p_track_id: entry.trackId ?? null,
-      p_duration: entry.duration ?? null,
-      p_finished: terminado,
-      p_title: entry.title ?? null,
-      p_author: entry.author ?? null,
-      p_device: deviceName(),
-      p_updated_at: new Date(entry.updatedAt || Date.now()).toISOString(),
-      p_incondicional: escrituraIncondicional({
-        terminado,
-        intencionado: entry.intencionado,
-      }),
-    })
-    if (error) throw error
-    // `false` significa que el servidor la ha rechazado por ir por detrás, y
-    // eso es una respuesta correcta, no un fallo: la nube ya tiene algo mejor.
-    return true
-  } catch (err) {
-    if (/guardar_progreso|PGRST202|schema cache/i.test(err?.message || '')) {
-      console.error(
-        'Falta la funcion guardar_progreso en Supabase. Ejecuta supabase/schema.sql ' +
-          'en el SQL Editor: sin ella no se sube nada, para no pisar el otro dispositivo.'
-      )
-    } else {
-      console.warn('No se pudo subir el progreso', err)
+    if (!sinFuncion.has(db)) {
+      const { error } = await db.rpc('guardar_progreso', {
+        p_book_id: fila.book_id,
+        p_global_position: fila.global_position,
+        p_position: fila.position,
+        p_track_id: fila.track_id,
+        p_duration: fila.duration,
+        p_finished: fila.finished,
+        p_title: fila.title,
+        p_author: fila.author,
+        p_device: fila.device,
+        p_updated_at: fila.updated_at,
+        p_incondicional: incondicional,
+      })
+      if (!error) return true
+      if (!faltaLaFuncion(error)) throw error
+
+      // No está instalada: se aprende y se sigue por el respaldo. Que falte no
+      // puede dejar la aplicación sin sincronizar, que es lo que pasaba antes.
+      sinFuncion.add(db)
+      if (!yaAvisados.has(db)) {
+        yaAvisados.add(db)
+        console.warn(
+          'guardar_progreso no está en Supabase: se sincroniza con la comprobación ' +
+            'en dos pasos. Ejecuta supabase/schema.sql para que sea atómica.'
+        )
+      }
     }
+    return await subidaCondicionalEnDosPasos(db, fila, incondicional)
+  } catch (err) {
+    console.warn('No se pudo subir el progreso', err)
     return false
   }
 }

@@ -21,6 +21,7 @@ import java.net.URLEncoder
  */
 object SupabaseSync {
 
+    private const val TAG = "LuminaSync"
     private const val PREFS = "lumina_sync"
     private const val CLAVE_ACCESO = "access_token"
     private const val CLAVE_REFRESCO = "refresh_token"
@@ -322,6 +323,57 @@ object SupabaseSync {
      * así que el desempate no desempataba nunca y el libro se quedaba sin
      * sincronizar, en silencio y sin error.
      */
+    /**
+     * ¿Está instalada `guardar_progreso`? Se aprende al primer intento.
+     *
+     * Que falte no puede dejar la aplicación sin sincronizar —eso fue un error
+     * de diseño—, así que se pasa al respaldo en dos pasos y se sigue.
+     */
+    @Volatile private var faltaLaFuncion = false
+    @Volatile private var yaAvisado = false
+
+    private fun esFuncionAusente(error: Throwable): Boolean {
+        val m = error.message.orEmpty()
+        return m.contains("PGRST202") ||
+            m.contains("Could not find the function", true) ||
+            m.contains("guardar_progreso")
+    }
+
+    /**
+     * Respaldo cuando la función no está: comprobar y luego escribir.
+     *
+     * Entre las dos operaciones queda una ventana de milisegundos, así que no
+     * es tan bueno como la comprobación del servidor. Pero es incomparablemente
+     * mejor que el upsert a ciegas de antes, cuya ventana era la sesión de
+     * escucha entera, y sobre todo funciona sin tener que ejecutar nada a mano.
+     */
+    private fun subirEnDosPasos(
+        acceso: String,
+        fila: JSONObject,
+        bookId: String,
+        posicionGlobal: Double,
+        incondicional: Boolean,
+    ) {
+        if (!incondicional) {
+            val filtro = URLEncoder.encode("eq.$bookId", "UTF-8")
+            val actuales = JSONArray(
+                peticion("GET", "/rest/v1/progress?book_id=$filtro&select=global_position", null, acceso)
+            )
+            if (actuales.length() > 0) {
+                val yaHay = actuales.getJSONObject(0).optDouble("global_position", 0.0)
+                // La nube va por delante: no hay nada que escribir.
+                if (yaHay >= posicionGlobal) return
+            }
+        }
+        peticion(
+            metodo = "POST",
+            ruta = "/rest/v1/progress",
+            cuerpo = JSONArray().put(fila).toString(),
+            token = acceso,
+            cabecerasExtra = mapOf("Prefer" to "resolution=merge-duplicates,return=minimal"),
+        )
+    }
+
     suspend fun subir(
         context: Context,
         progreso: Progreso,
@@ -332,52 +384,66 @@ object SupabaseSync {
         withContext(Dispatchers.IO) {
             if (!configurado()) return@withContext false
             val acceso = token(context) ?: return@withContext false
+            val incondicional = EmparejarLibros.escrituraIncondicional(
+                terminado = progreso.terminado,
+                intencionado = intencionado,
+            )
+            val fila = JSONObject()
+                .put("book_id", progreso.bookId)
+                .put("track_id", progreso.trackId ?: JSONObject.NULL)
+                .put("position", progreso.posicionSegundos)
+                .put("global_position", progreso.posicionGlobalSegundos)
+                .put("duration", progreso.duracionSegundos ?: JSONObject.NULL)
+                .put("finished", progreso.terminado)
+                .put("title", titulo ?: JSONObject.NULL)
+                .put("author", autor?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+                .put("device", "Móvil (Android)")
+                .put("updated_at", iso8601(progreso.actualizadoEn))
+
             runCatching {
-                // Se llama a `guardar_progreso` en vez de escribir la tabla
-                // directamente: la comprobación de que no se retrocede la hace
-                // el servidor, en la misma operación que la escritura, así que
-                // no hay hueco entre mirar y escribir. Ver supabase/schema.sql.
-                val argumentos = JSONObject()
-                    .put("p_book_id", progreso.bookId)
-                    .put("p_global_position", progreso.posicionGlobalSegundos)
-                    .put("p_position", progreso.posicionSegundos)
-                    .put("p_track_id", progreso.trackId ?: JSONObject.NULL)
-                    .put("p_duration", progreso.duracionSegundos ?: JSONObject.NULL)
-                    .put("p_finished", progreso.terminado)
-                    .put("p_title", titulo ?: JSONObject.NULL)
-                    .put("p_author", autor?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
-                    .put("p_device", "Móvil (Android)")
-                    .put("p_updated_at", iso8601(progreso.actualizadoEn))
-                    .put(
-                        "p_incondicional",
-                        EmparejarLibros.escrituraIncondicional(
-                            terminado = progreso.terminado,
-                            intencionado = intencionado,
+                if (!faltaLaFuncion) {
+                    // La comprobación de que no se retrocede la hace el
+                    // servidor, en la misma operación que la escritura, así que
+                    // no hay hueco entre mirar y escribir.
+                    val argumentos = JSONObject()
+                        .put("p_book_id", progreso.bookId)
+                        .put("p_global_position", progreso.posicionGlobalSegundos)
+                        .put("p_position", progreso.posicionSegundos)
+                        .put("p_track_id", progreso.trackId ?: JSONObject.NULL)
+                        .put("p_duration", progreso.duracionSegundos ?: JSONObject.NULL)
+                        .put("p_finished", progreso.terminado)
+                        .put("p_title", titulo ?: JSONObject.NULL)
+                        .put("p_author", autor?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+                        .put("p_device", "Móvil (Android)")
+                        .put("p_updated_at", iso8601(progreso.actualizadoEn))
+                        .put("p_incondicional", incondicional)
+                    try {
+                        peticion(
+                            metodo = "POST",
+                            ruta = "/rest/v1/rpc/guardar_progreso",
+                            cuerpo = argumentos.toString(),
+                            token = acceso,
                         )
-                    )
-                peticion(
-                    metodo = "POST",
-                    ruta = "/rest/v1/rpc/guardar_progreso",
-                    cuerpo = argumentos.toString(),
-                    token = acceso,
-                )
-                // La funcion devuelve false si ha rechazado la posicion por ir
-                // por detras. Eso es una respuesta correcta, no un fallo: la
-                // nube ya tiene algo mejor y no hay nada que arreglar.
-                true
-            }.getOrElse { error ->
-                if (error.message?.contains("guardar_progreso") == true ||
-                    error.message?.contains("PGRST202") == true
-                ) {
-                    android.util.Log.e(
-                        "LuminaSync",
-                        "Falta la funcion guardar_progreso en Supabase: ejecuta supabase/schema.sql. " +
-                            "Sin ella no se sube nada, para no pisar el otro dispositivo.",
-                        error,
-                    )
+                        // Devuelve false si ha rechazado la posición por ir por
+                        // detrás: es una respuesta correcta, no un fallo.
+                        return@runCatching true
+                    } catch (error: Exception) {
+                        if (!esFuncionAusente(error)) throw error
+                        faltaLaFuncion = true
+                        if (!yaAvisado) {
+                            yaAvisado = true
+                            android.util.Log.w(
+                                TAG,
+                                "guardar_progreso no esta en Supabase: se sincroniza con la " +
+                                    "comprobacion en dos pasos. Ejecuta supabase/schema.sql " +
+                                    "para que sea atomica."
+                            )
+                        }
+                    }
                 }
-                false
-            }
+                subirEnDosPasos(acceso, fila, progreso.bookId, progreso.posicionGlobalSegundos, incondicional)
+                true
+            }.getOrElse { false }
         }
 
     /**

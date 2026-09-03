@@ -255,6 +255,74 @@ test('si falla la red no se sube nada', async () => {
   assert.equal(await pushProgress(escucha(200), db), false)
 })
 
+/* ---------------- Respaldo cuando falta la funcion ---------------- */
+
+/**
+ * Nube falsa SIN `guardar_progreso` instalada, como esta ahora mismo el
+ * proyecto de Supabase. La aplicacion tiene que seguir sincronizando: dejarla
+ * muerta hasta que alguien ejecute un SQL a mano fue un error de diseno.
+ */
+function nubeSinFuncion(filaInicial = null) {
+  const estado = { fila: filaInicial, ops: [] }
+  return {
+    estado,
+    async rpc() {
+      estado.ops.push('rpc')
+      return { error: { code: 'PGRST202', message: 'Could not find the function public.guardar_progreso' } }
+    },
+    from() {
+      return {
+        select() {
+          return {
+            eq: () => ({
+              maybeSingle: async () => {
+                estado.ops.push('leer')
+                return { data: estado.fila, error: null }
+              },
+            }),
+          }
+        },
+        async upsert(fila) {
+          estado.ops.push('escribir')
+          estado.fila = { ...(estado.fila || {}), ...fila }
+          return { error: null }
+        },
+      }
+    },
+  }
+}
+
+test('sin la funcion instalada la sincronizacion sigue funcionando', async () => {
+  const db = nubeSinFuncion(null)
+  assert.equal(await pushProgress(escucha(120), db), true)
+  assert.equal(db.estado.fila.global_position, 120)
+})
+
+test('sin la funcion, tampoco pisa una posicion mas avanzada', async () => {
+  // La ventana pasa a ser de milisegundos en vez de la sesion entera, que es
+  // lo que importa. Atomico solo cuando la funcion este instalada.
+  const db = nubeSinFuncion({ book_id: 'libro', global_position: 53828 })
+  assert.equal(await pushProgress(escucha(52486), db), true)
+  assert.equal(db.estado.fila.global_position, 53828, 'la nube no debe retroceder')
+  assert.ok(db.estado.ops.includes('leer'), 'comprueba antes de escribir')
+  assert.ok(!db.estado.ops.includes('escribir'), 'y no escribe si va por detras')
+})
+
+test('sin la funcion, un retroceso elegido por el usuario si pisa', async () => {
+  const db = nubeSinFuncion({ book_id: 'libro', global_position: 53828 })
+  await pushProgress(escucha(23400, { intencionado: true }), db)
+  assert.equal(db.estado.fila.global_position, 23400)
+  assert.ok(!db.estado.ops.includes('leer'), 'ni se molesta en comprobar')
+})
+
+test('sin la funcion, si falla la lectura no se escribe nada', async () => {
+  const db = nubeSinFuncion({ book_id: 'libro', global_position: 100 })
+  db.from = () => ({
+    select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: new Error('sin conexion') }) }) }),
+  })
+  assert.equal(await pushProgress(escucha(200), db), false)
+})
+
 /* ---------------- resolveProgress ---------------- */
 
 test('una fila sin global no se toma por el principio del libro', () => {
