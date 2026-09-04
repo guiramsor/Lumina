@@ -233,8 +233,19 @@ object GuardadoDeProgreso {
         colocado = false
     }
 
+    /**
+     * La posición la acaba de elegir el usuario, no la inercia del reproductor.
+     *
+     * Además deshace la marca de final. El cerrojo `YA_TERMINADO` está para que
+     * el reloj no siga subiendo «sin terminar» desde el último segundo, no para
+     * desoír al usuario: mientras estuvo puesto, mover la barra después de que
+     * el libro llegara al final dejaba de guardar **hasta en el disco**. La
+     * pantalla avanzaba, el disco no, y al reabrir el libro seguía al 100 %.
+     * Justo el accidente del que este botón de volver quería proteger.
+     */
     fun marcarIntencionada() {
         intencion.marcar()
+        terminado = false
     }
 
     fun fijarVelocidad(nueva: Float) {

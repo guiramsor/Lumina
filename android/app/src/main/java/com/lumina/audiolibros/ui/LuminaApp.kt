@@ -53,6 +53,8 @@ private enum class Pantalla { BIBLIOTECA, REPRODUCTOR, SESION, ESTADISTICAS }
 
 @Composable
 fun LuminaApp(
+    abrirReproductor: Boolean = false,
+    onReproductorAbierto: () -> Unit = {},
     onAcento: (Color?) -> Unit = {},
     onSonando: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -69,6 +71,24 @@ fun LuminaApp(
     LaunchedEffect(estado.sonando) { onSonando(estado.sonando) }
 
     var pantalla by remember { mutableStateOf(Pantalla.BIBLIOTECA) }
+
+    /*
+     * Engancharse a lo que el servicio ya esté reproduciendo.
+     *
+     * Se hace siempre, no solo al venir de la notificación: el servicio
+     * sobrevive a la pantalla, así que al reabrir la aplicación con algo
+     * sonando la biblioteca debe saber cuál es el libro en curso. Y si quien
+     * abre es la notificación, además se salta directo al reproductor, que es
+     * a lo que has ido al tocarla.
+     */
+    LaunchedEffect(estado.controller, abrirReproductor) {
+        if (estado.controller == null) return@LaunchedEffect
+        val hayLibro = estado.adoptarLoQueSuena()
+        if (hayLibro && abrirReproductor) {
+            pantalla = Pantalla.REPRODUCTOR
+            onReproductorAbierto()
+        }
+    }
     var biblioteca by remember { mutableStateOf<List<Audiolibro>>(emptyList()) }
     var progresos by remember { mutableStateOf<Map<String, AlmacenLocal.Progreso>>(emptyMap()) }
     var permisoConcedido by remember { mutableStateOf(tienePermisoAudio(context)) }

@@ -24,6 +24,7 @@ import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.library.Audiolibro
 import com.lumina.audiolibros.player.Catalogo
 import com.lumina.audiolibros.player.PlaybackService
+import com.lumina.audiolibros.player.SaltoGrande
 import com.lumina.audiolibros.player.TemporizadorDeSueno
 import com.lumina.audiolibros.sync.EmparejarLibros
 import com.lumina.audiolibros.sync.GuardadoDeProgreso
@@ -91,12 +92,48 @@ class EstadoReproductor(
 
     private var ultimaPausaEn: Long? = null
 
+    /**
+     * A dónde volver si el último salto fue un accidente.
+     *
+     * La barra de un libro de sesenta horas es tan sensible que un roce te
+     * manda a otro capítulo, y volver es tedioso porque ya no sabes dónde
+     * estabas. Esto lo recuerda por ti durante unos segundos.
+     */
+    var puntoDeRegresoMs by mutableStateOf<Long?>(null)
+        private set
+    private var regresoCaducaEn = 0L
+
     /* ---------------- Abrir ---------------- */
+
+    /**
+     * Engancha la pantalla a lo que el servicio ya está reproduciendo.
+     *
+     * Hace falta porque el servicio sobrevive a la pantalla: al volver desde la
+     * notificación —o al reabrir la aplicación con algo sonando— la interfaz
+     * nace sin saber qué libro es. Esto **no** vuelve a abrirlo: no reconcilia
+     * con la nube ni registra nada en el guardián, porque el servicio ya lo
+     * tiene todo hecho. Solo apunta la pantalla a lo que hay.
+     *
+     * Devuelve false si no hay nada sonando o si el libro ya no está en la
+     * biblioteca.
+     */
+    suspend fun adoptarLoQueSuena(): Boolean {
+        val c = controller ?: return false
+        val id = c.currentMediaItem?.mediaId?.takeIf { it.isNotEmpty() } ?: return false
+        if (libro?.bookId == id) return true
+        val encontrado = enFondo { Catalogo.porId(context, id) } ?: return false
+        libro = encontrado
+        velocidad = c.playbackParameters.speed
+        sonando = c.isPlaying
+        refrescarPosicion()
+        return true
+    }
 
     fun abrir(elegido: Audiolibro, alTerminar: () -> Unit = {}) {
         val c = controller ?: return
         cargando = true
         aviso = null
+        puntoDeRegresoMs = null
         alcance.launch {
             val local = AlmacenLocal.progreso(context, elegido.bookId)
             val guardado = AlmacenLocal.syncId(context, elegido.bookId)
@@ -278,12 +315,45 @@ class EstadoReproductor(
     private fun posicionGlobal(c: MediaController): Long =
         PosicionDelLibro.aGlobal(duraciones(), c.currentMediaItemIndex, c.currentPosition)
 
-    /** Lleva la reproducción a un segundo del libro, sea la pista que sea. */
-    private fun irA(globalMs: Long) {
+    /**
+     * Lleva la reproducción a un segundo del libro, sea la pista que sea.
+     *
+     * Si el salto es grande deja apuntado de dónde venía, para poder ofrecer
+     * la vuelta. `armarRegreso` en false es para la propia vuelta: si no,
+     * volver armaría a su vez un regreso al sitio del accidente.
+     */
+    private fun irA(globalMs: Long, armarRegreso: Boolean = true) {
         val c = controller ?: return
         val tope = (libro?.duracionMs ?: 0L).coerceAtLeast(0L)
-        val punto = PosicionDelLibro.desdeGlobal(duraciones(), globalMs.coerceIn(0L, tope))
+        val veniaDe = posicionGlobal(c)
+        val destino = globalMs.coerceIn(0L, tope)
+        val punto = PosicionDelLibro.desdeGlobal(duraciones(), destino)
         c.seekTo(punto.indice, punto.dentro)
+
+        if (armarRegreso && SaltoGrande.mereceDeshacer(veniaDe, destino)) {
+            puntoDeRegresoMs = veniaDe
+            regresoCaducaEn = System.currentTimeMillis() + SaltoGrande.VENTANA_MS
+        }
+    }
+
+    /**
+     * Vuelve a donde estabas antes del último salto grande.
+     *
+     * Va marcada como intencionada porque lo es: sin eso, el servidor la
+     * rechazaría por ir hacia atrás y la nube se quedaría con la posición del
+     * accidente.
+     */
+    fun volverAlPuntoAnterior() {
+        val destino = puntoDeRegresoMs ?: return
+        puntoDeRegresoMs = null
+        irA(destino, armarRegreso = false)
+        ultimaPausaEn = null
+        GuardadoDeProgreso.marcarIntencionada()
+        guardarAhora()
+    }
+
+    fun descartarRegreso() {
+        puntoDeRegresoMs = null
     }
 
     /* ---------------- Temporizador de sueño ---------------- */
@@ -329,6 +399,9 @@ class EstadoReproductor(
         val c = controller ?: return
         posicionMs = posicionGlobal(c)
         duracionMs = libro?.duracionMs ?: 0L
+        if (puntoDeRegresoMs != null && System.currentTimeMillis() > regresoCaducaEn) {
+            puntoDeRegresoMs = null
+        }
     }
 
     /**

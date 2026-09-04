@@ -148,7 +148,9 @@ supabase/schema.sql           # Tabla progress con RLS
 1. Gana la escucha **más avanzada**, no la más reciente (margen de 5 s).
 2. No se pisa una posición más avanzada… **salvo que la haya elegido el
    usuario** (barra, saltos, marcador, capítulo, reabrir un libro terminado).
-   Sin esa excepción, retroceder media hora no sobrevivía.
+   Sin esa excepción, retroceder media hora no sobrevivía. Elegir a mano
+   también **levanta la marca de final**: si no, mover la barra después de que
+   el libro acabara dejaba de guardar hasta en el disco.
 3. Si la lectura de la nube **falla**, no se sube nada. «No hay fila» y «no he
    podido leer» son casos distintos.
 4. Si las huellas no coinciden (copias recodificadas o etiquetas editadas), se
@@ -223,6 +225,11 @@ arranque y publica una release con el zip de Windows.
   libro retoma donde se dejó consultando la nube.
 - Una sola instancia del escritorio; libros terminados marcados; archivos
   perdidos señalados en la biblioteca.
+- **Botón de volver tras un salto grande** (móvil): mover la barra más de un
+  minuto deja doce segundos un «Volver a hh:mm:ss» debajo de ella. Los botones
+  de 15 s y 30 s no lo disparan, a propósito. Regla en `SaltoGrande`.
+- **Tocar la notificación abre el libro que suena** (móvil), no la biblioteca.
+  Verificado con la aplicación en segundo plano y con la Activity ya destruida.
 
 ### Lo que falta / limitaciones conocidas
 
@@ -237,9 +244,10 @@ arranque y publica una release con el zip de Windows.
 
 ### Pendiente de decisión del usuario
 
-- **«El Ritmo de la Guerra» está en ~14 h 28 min.** Durante una sesión de
-  pruebas se quedó reproduciéndose solo y avanzó desde las 7 h 06 min 33 s
-  reales. El usuario dijo que ya lo corregirá él al terminar las modificaciones.
+- **«El Ritmo de la Guerra» está en 24 h 42 min 56 s (40 %).** Es una posición
+  de pruebas, no la del usuario: se movió al verificar el botón de volver y el
+  guardado después del final. La real eran 7 h 06 min 33 s. El usuario dijo que
+  ya lo corregirá él al terminar las modificaciones.
 - Para probar Android Auto hay que activar **«Fuentes desconocidas»** en las
   opciones de desarrollador de la app Android Auto (Lumina se instala fuera de
   Google Play). Sin eso no aparece, por muy bien que esté el código.

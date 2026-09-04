@@ -1,6 +1,11 @@
 package com.lumina.audiolibros.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,8 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lumina.audiolibros.data.AlmacenLocal
-import kotlinx.coroutines.delay
 import java.util.UUID
+import kotlinx.coroutines.delay
 
 private val MINUTOS_SUENO = listOf(5, 10, 15, 30, 45, 60)
 
@@ -127,6 +132,46 @@ fun PantallaReproductor(
                 "-${formatearTiempo((duracion - posicionMostrada).coerceAtLeast(0))}",
                 style = MaterialTheme.typography.labelMedium,
             )
+        }
+
+        // Red de seguridad para los saltos grandes. Aparece justo debajo de la
+        // barra, que es donde acaba de ocurrir el accidente y donde estás
+        // mirando, y se va sola a los pocos segundos.
+        AnimatedVisibility(
+            visible = estado.puntoDeRegresoMs != null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            val volverA = estado.puntoDeRegresoMs
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { estado.volverAlPuntoAnterior() }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                IconoLumina(
+                    tamano = 22.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                    dibujo = { c, g -> iconoDeshacer(c, g) },
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Volver a ${formatearTiempo(volverA ?: 0)}",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Text(
+                        "Has saltado sin querer?",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = { estado.descartarRegreso() }) { Text("No") }
+            }
         }
 
         Spacer(Modifier.height(20.dp))

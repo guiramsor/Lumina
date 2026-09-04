@@ -149,3 +149,14 @@ fun DrawScope.iconoLlama(color: Color, grosor: Float) =
             "0 .9-.2 1.7-.6 2.4.8-.2 1.5-.7 2-1.4 1.3 1.4 2.1 3.2 2.1 5 0 3.5-2.6 6-6.5 6z",
         color, grosor,
     )
+
+/**
+ * Flecha que vuelve sobre sus pasos: deshacer un salto de la barra.
+ *
+ * No se usa el icono de Material porque aqui no hay juego de iconos: se dibuja
+ * a mano como los demas para que el trazo sea el mismo en toda la aplicacion.
+ */
+fun DrawScope.iconoDeshacer(color: Color, grosor: Float) {
+    trazo("M9 13 4 8 9 3", color, grosor)
+    trazo("M4 8h9a5.5 5.5 0 0 1 0 11H9.5", color, grosor)
+}

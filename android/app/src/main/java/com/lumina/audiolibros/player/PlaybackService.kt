@@ -1,5 +1,6 @@
 package com.lumina.audiolibros.player
 
+import android.app.PendingIntent
 import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -15,6 +16,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
+import com.lumina.audiolibros.MainActivity
 import com.lumina.audiolibros.sync.GuardadoDeProgreso
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +34,9 @@ const val EXTRA_TRACK_ID = "lumina_track_id"
 
 /** Fila de la nube del libro: puede no coincidir con la huella del archivo. */
 const val EXTRA_SYNC_ID = "lumina_sync_id"
+
+/** Marca con la que la notificación pide abrir directamente el reproductor. */
+const val EXTRA_ABRIR_REPRODUCTOR = "lumina_abrir_reproductor"
 
 /**
  * Servicio de reproducción.
@@ -96,7 +101,33 @@ class PlaybackService : MediaLibraryService() {
             }
         })
 
-        session = MediaLibrarySession.Builder(this, player, CallbackDelCoche()).build()
+        session = MediaLibrarySession.Builder(this, player, CallbackDelCoche())
+            // Sin esto, tocar la notificación no hacía nada. Ahora abre la app
+            // por el libro que está sonando, que es lo único que puedes querer
+            // si estás tocando ahí.
+            .setSessionActivity(intentDeLaPantalla())
+            .build()
+    }
+
+    /**
+     * A dónde lleva tocar la notificación: la pantalla del reproductor.
+     *
+     * `SINGLE_TOP` para que no se apile una segunda copia de la aplicación si
+     * ya estaba abierta; en ese caso llega por `onNewIntent`.
+     */
+    private fun intentDeLaPantalla(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            putExtra(EXTRA_ABRIR_REPRODUCTOR, true)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        return PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 
     /* ---------------- Reloj de guardado ---------------- */
