@@ -184,6 +184,13 @@ object GuardadoDeProgreso {
      */
     fun estaColocado(): Boolean = colocado
 
+    /**
+     * Las duraciones del libro abierto, para traducir «pista 7, minuto 3» a la
+     * posición global. Las necesita el servicio al anotar un salto grande, que
+     * puede llegarle del coche o de la notificación sin que la pantalla exista.
+     */
+    fun duracionesDelLibro(): List<Long> = duraciones
+
     /* ---------------- Ciclo de vida de la sesión ---------------- */
 
     /**

@@ -46,9 +46,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.unit.sp
 import com.lumina.audiolibros.data.AlmacenLocal
 import java.util.UUID
@@ -137,6 +140,20 @@ fun PantallaReproductor(
         // Red de seguridad para los saltos grandes. Aparece justo debajo de la
         // barra, que es donde acaba de ocurrir el accidente y donde estás
         // mirando, y se va sola a los pocos segundos.
+        //
+        // Esos segundos se cuentan desde que lo ves, no desde el salto: si el
+        // roce fue en la barra de la notificación, el ofrecimiento ha estado
+        // esperando a que abrieras la aplicación.
+        //
+        // Y «ver» es tenerlo delante, no estar compuesto. Al irte al escritorio
+        // la composición sigue viva, así que sin el `repeatOnLifecycle` el
+        // ofrecimiento que llegaba de la notificación gastaba sus doce segundos
+        // a solas, en segundo plano, y no quedaba nada cuando abrías la app.
+        val ciclo = LocalLifecycleOwner.current.lifecycle
+        LaunchedEffect(estado.puntoDeRegresoMs, ciclo) {
+            if (estado.puntoDeRegresoMs == null) return@LaunchedEffect
+            ciclo.repeatOnLifecycle(Lifecycle.State.RESUMED) { estado.regresoALaVista() }
+        }
         AnimatedVisibility(
             visible = estado.puntoDeRegresoMs != null,
             enter = fadeIn() + expandVertically(),

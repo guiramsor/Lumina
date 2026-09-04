@@ -61,6 +61,49 @@ class SaltoGrandeTest {
         assertFalse(SaltoGrande.mereceDeshacer(1_234_567L, 1_234_567L))
     }
 
+    /* ---------------- Cuanto vive el ofrecimiento ---------------- */
+
+    @Test
+    fun `sin ver, el ofrecimiento aguanta a que abras la aplicacion`() {
+        // El caso que da sentido a la ventana larga: el roce pasa en la barra
+        // de la notificacion, y entre eso y abrir la app hay un «que ha sido
+        // eso», sacar el movil y desbloquearlo. Con doce segundos no llegaba.
+        val creado = 1_000_000L
+        assertFalse(SaltoGrande.caducado(creado, vistoEn = 0, ahora = creado + 30_000))
+        assertFalse(SaltoGrande.caducado(creado, vistoEn = 0, ahora = creado + 2 * 60_000))
+    }
+
+    @Test
+    fun `sin ver tampoco espera para siempre`() {
+        val creado = 1_000_000L
+        val tarde = creado + SaltoGrande.VENTANA_SIN_VER_MS + 1
+        assertTrue(SaltoGrande.caducado(creado, vistoEn = 0, ahora = tarde))
+    }
+
+    @Test
+    fun `una vez visto, corre la ventana corta`() {
+        // Y corre desde que se ve, no desde el salto: da igual lo viejo que
+        // sea el ofrecimiento, lo que cuenta es cuanto lleva en pantalla.
+        val creado = 1_000_000L
+        val visto = creado + 4 * 60_000
+        assertFalse(SaltoGrande.caducado(creado, visto, ahora = visto + 11_000))
+        assertTrue(SaltoGrande.caducado(creado, visto, ahora = visto + 13_000))
+    }
+
+    @Test
+    fun `la ventana en pantalla es mas corta que la de espera`() {
+        // Si alguien las igualara, el boton se quedaria cinco minutos tapando
+        // la interfaz despues de un salto que si querias dar.
+        assertTrue(SaltoGrande.VENTANA_EN_PANTALLA_MS < SaltoGrande.VENTANA_SIN_VER_MS)
+    }
+
+    @Test
+    fun `el margen de la vuelta no llega al umbral`() {
+        // Si el margen alcanzara al umbral, volver contaria como un salto
+        // nuevo y el boton se ofreceria a si mismo en bucle.
+        assertTrue(SaltoGrande.MARGEN_DE_VUELTA_MS < SaltoGrande.UMBRAL_MS)
+    }
+
     @Test
     fun `el umbral esta por encima del mayor salto de un boton`() {
         // La invariante de la que depende todo lo demas.

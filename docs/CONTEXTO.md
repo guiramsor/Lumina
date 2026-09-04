@@ -225,9 +225,13 @@ arranque y publica una release con el zip de Windows.
   libro retoma donde se dejó consultando la nube.
 - Una sola instancia del escritorio; libros terminados marcados; archivos
   perdidos señalados en la biblioteca.
-- **Botón de volver tras un salto grande** (móvil): mover la barra más de un
-  minuto deja doce segundos un «Volver a hh:mm:ss» debajo de ella. Los botones
-  de 15 s y 30 s no lo disparan, a propósito. Regla en `SaltoGrande`.
+- **Botón de volver tras un salto grande** (móvil): un salto de más de un
+  minuto deja un «Volver a hh:mm:ss» debajo de la barra. Los botones de 15 s y
+  30 s no lo disparan, a propósito. Lo apunta el servicio, así que vale también
+  para los saltos que no salen de la pantalla —la barra de la notificación, el
+  coche— y en ese caso el ofrecimiento espera hasta 5 min a que abras la app;
+  una vez lo ves, se va a los 12 s. Reglas en `SaltoGrande`, estado en
+  `Regreso`.
 - **Tocar la notificación abre el libro que suena** (móvil), no la biblioteca.
   Verificado con la aplicación en segundo plano y con la Activity ya destruida.
 

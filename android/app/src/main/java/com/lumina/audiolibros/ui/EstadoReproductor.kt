@@ -24,7 +24,7 @@ import com.lumina.audiolibros.data.AlmacenLocal
 import com.lumina.audiolibros.library.Audiolibro
 import com.lumina.audiolibros.player.Catalogo
 import com.lumina.audiolibros.player.PlaybackService
-import com.lumina.audiolibros.player.SaltoGrande
+import com.lumina.audiolibros.player.Regreso
 import com.lumina.audiolibros.player.TemporizadorDeSueno
 import com.lumina.audiolibros.sync.EmparejarLibros
 import com.lumina.audiolibros.sync.GuardadoDeProgreso
@@ -97,11 +97,14 @@ class EstadoReproductor(
      *
      * La barra de un libro de sesenta horas es tan sensible que un roce te
      * manda a otro capítulo, y volver es tedioso porque ya no sabes dónde
-     * estabas. Esto lo recuerda por ti durante unos segundos.
+     * estabas. Esto lo recuerda por ti.
+     *
+     * Es un espejo de [Regreso], no la fuente: el ofrecimiento lo apunta el
+     * servicio, porque el roce puede darse en la barra de la notificación con
+     * esta pantalla sin existir siquiera.
      */
     var puntoDeRegresoMs by mutableStateOf<Long?>(null)
         private set
-    private var regresoCaducaEn = 0L
 
     /* ---------------- Abrir ---------------- */
 
@@ -134,6 +137,7 @@ class EstadoReproductor(
         cargando = true
         aviso = null
         puntoDeRegresoMs = null
+        Regreso.descartar()
         alcance.launch {
             val local = AlmacenLocal.progreso(context, elegido.bookId)
             val guardado = AlmacenLocal.syncId(context, elegido.bookId)
@@ -318,22 +322,16 @@ class EstadoReproductor(
     /**
      * Lleva la reproducción a un segundo del libro, sea la pista que sea.
      *
-     * Si el salto es grande deja apuntado de dónde venía, para poder ofrecer
-     * la vuelta. `armarRegreso` en false es para la propia vuelta: si no,
-     * volver armaría a su vez un regreso al sitio del accidente.
+     * No decide nada sobre el botón de volver: el salto acaba en el mismo
+     * `onPositionDiscontinuity` del servicio que los que llegan de fuera, y es
+     * allí donde se apunta. Tenerlo en dos sitios era tener dos reglas.
      */
-    private fun irA(globalMs: Long, armarRegreso: Boolean = true) {
+    private fun irA(globalMs: Long) {
         val c = controller ?: return
         val tope = (libro?.duracionMs ?: 0L).coerceAtLeast(0L)
-        val veniaDe = posicionGlobal(c)
         val destino = globalMs.coerceIn(0L, tope)
         val punto = PosicionDelLibro.desdeGlobal(duraciones(), destino)
         c.seekTo(punto.indice, punto.dentro)
-
-        if (armarRegreso && SaltoGrande.mereceDeshacer(veniaDe, destino)) {
-            puntoDeRegresoMs = veniaDe
-            regresoCaducaEn = System.currentTimeMillis() + SaltoGrande.VENTANA_MS
-        }
     }
 
     /**
@@ -344,9 +342,11 @@ class EstadoReproductor(
      * accidente.
      */
     fun volverAlPuntoAnterior() {
-        val destino = puntoDeRegresoMs ?: return
+        val destino = Regreso.punto() ?: return
+        // El servicio reconocerá el salto como la vuelta y retirará el
+        // ofrecimiento; aquí se apaga ya para que el botón no parpadee.
         puntoDeRegresoMs = null
-        irA(destino, armarRegreso = false)
+        irA(destino)
         ultimaPausaEn = null
         GuardadoDeProgreso.marcarIntencionada()
         guardarAhora()
@@ -354,6 +354,12 @@ class EstadoReproductor(
 
     fun descartarRegreso() {
         puntoDeRegresoMs = null
+        Regreso.descartar()
+    }
+
+    /** La pantalla ha enseñado el ofrecimiento: desde aquí corre su ventana. */
+    fun regresoALaVista() {
+        Regreso.visto()
     }
 
     /* ---------------- Temporizador de sueño ---------------- */
@@ -399,9 +405,7 @@ class EstadoReproductor(
         val c = controller ?: return
         posicionMs = posicionGlobal(c)
         duracionMs = libro?.duracionMs ?: 0L
-        if (puntoDeRegresoMs != null && System.currentTimeMillis() > regresoCaducaEn) {
-            puntoDeRegresoMs = null
-        }
+        puntoDeRegresoMs = Regreso.punto()
     }
 
     /**

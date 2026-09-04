@@ -18,6 +18,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import com.lumina.audiolibros.MainActivity
 import com.lumina.audiolibros.sync.GuardadoDeProgreso
+import com.lumina.audiolibros.sync.PosicionDelLibro
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,6 +86,36 @@ class PlaybackService : MediaLibraryService() {
                 if (isPlaying) arrancarReloj() else {
                     pararReloj()
                     guardarLoQueSuena(forzar = true)
+                }
+            }
+
+            /**
+             * Un salto puede venir de cualquier sitio: la barra de la pantalla,
+             * la de la notificación, el coche o los botones del manos libres.
+             * Se anota aquí, que es el único punto por el que pasan todos.
+             *
+             * `estaColocado` filtra la colocación inicial: hasta que el libro
+             * no está puesto en su sitio, moverse no es un accidente del que
+             * haya nada que salvar.
+             */
+            override fun onPositionDiscontinuity(
+                anterior: Player.PositionInfo,
+                nueva: Player.PositionInfo,
+                razon: Int,
+            ) {
+                if (razon != Player.DISCONTINUITY_REASON_SEEK) return
+                if (!GuardadoDeProgreso.estaColocado()) return
+                val duraciones = GuardadoDeProgreso.duracionesDelLibro()
+                if (duraciones.isEmpty()) return
+                val veniaDe = PosicionDelLibro.aGlobal(
+                    duraciones, anterior.mediaItemIndex, anterior.positionMs
+                )
+                val vaA = PosicionDelLibro.aGlobal(
+                    duraciones, nueva.mediaItemIndex, nueva.positionMs
+                )
+                when {
+                    Regreso.esLaVuelta(vaA) -> Regreso.descartar()
+                    SaltoGrande.mereceDeshacer(veniaDe, vaA) -> Regreso.armar(veniaDe)
                 }
             }
 
