@@ -198,7 +198,7 @@ npm run test:arranque     # comprueba que la app empaquetada abre (sin otra abie
 npm run dist              # genera dist-desktop/Lumina-win32-x64/
 
 # Móvil (desde android/, con JAVA_HOME apuntando al jbr de Android Studio)
-./gradlew testDebugUnitTest        # 37 tests
+./gradlew testDebugUnitTest        # 103 tests
 ./gradlew installDebug             # compila e instala
 ./gradlew connectedDebugAndroidTest # prueba instrumentada del catálogo del coche
 ```
